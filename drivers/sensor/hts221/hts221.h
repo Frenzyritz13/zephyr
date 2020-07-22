@@ -30,21 +30,22 @@
 
 struct hts221_data {
 	struct device *i2c;
-	s16_t rh_sample;
-	s16_t t_sample;
+	int16_t rh_sample;
+	int16_t t_sample;
 
-	u8_t h0_rh_x2;
-	u8_t h1_rh_x2;
-	u16_t t0_degc_x8;
-	u16_t t1_degc_x8;
-	s16_t h0_t0_out;
-	s16_t h1_t0_out;
-	s16_t t0_out;
-	s16_t t1_out;
+	uint8_t h0_rh_x2;
+	uint8_t h1_rh_x2;
+	uint16_t t0_degc_x8;
+	uint16_t t1_degc_x8;
+	int16_t h0_t0_out;
+	int16_t h1_t0_out;
+	int16_t t0_out;
+	int16_t t1_out;
 
 #ifdef CONFIG_HTS221_TRIGGER
-	struct device *gpio;
-	struct gpio_callback gpio_cb;
+	struct device *dev;
+	struct device *drdy_dev;
+	struct gpio_callback drdy_cb;
 
 	struct sensor_trigger data_ready_trigger;
 	sensor_trigger_handler_t data_ready_handler;
@@ -52,12 +53,21 @@ struct hts221_data {
 #if defined(CONFIG_HTS221_TRIGGER_OWN_THREAD)
 	K_THREAD_STACK_MEMBER(thread_stack, CONFIG_HTS221_THREAD_STACK_SIZE);
 	struct k_thread thread;
-	struct k_sem gpio_sem;
+	struct k_sem drdy_sem;
 #elif defined(CONFIG_HTS221_TRIGGER_GLOBAL_THREAD)
 	struct k_work work;
-	struct device *dev;
 #endif
 
+#endif /* CONFIG_HTS221_TRIGGER */
+};
+
+struct hts221_config {
+	const char *i2c_bus;
+	uint16_t i2c_addr;
+#ifdef CONFIG_HTS221_TRIGGER
+	gpio_pin_t drdy_pin;
+	gpio_flags_t drdy_flags;
+	const char *drdy_controller;
 #endif /* CONFIG_HTS221_TRIGGER */
 };
 

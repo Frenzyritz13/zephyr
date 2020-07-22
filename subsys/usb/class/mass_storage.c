@@ -107,21 +107,29 @@ static volatile int thread_op;
 static K_THREAD_STACK_DEFINE(mass_thread_stack, DISK_THREAD_STACK_SZ);
 static struct k_thread mass_thread_data;
 static struct k_sem disk_wait_sem;
-static volatile u32_t defered_wr_sz;
+static volatile uint32_t defered_wr_sz;
 
-static u8_t page[BLOCK_SIZE];
+/*
+ * Keep block buffer larger than BLOCK_SIZE for the case
+ * the dCBWDataTransferLength is multiple of the BLOCK_SIZE and
+ * the length of the transferred data is not aligned to the BLOCK_SIZE.
+ *
+ * Align for cases where the underlying disk access requires word-aligned
+ * addresses.
+ */
+static uint8_t __aligned(4) page[BLOCK_SIZE + CONFIG_MASS_STORAGE_BULK_EP_MPS];
 
 /* Initialized during mass_storage_init() */
-static u32_t memory_size;
-static u32_t block_count;
+static uint32_t memory_size;
+static uint32_t block_count;
 static const char *disk_pdrv = CONFIG_MASS_STORAGE_DISK_NAME;
 
 #define MSD_OUT_EP_IDX			0
 #define MSD_IN_EP_IDX			1
 
-static void mass_storage_bulk_out(u8_t ep,
+static void mass_storage_bulk_out(uint8_t ep,
 				  enum usb_dc_ep_cb_status_code ep_status);
-static void mass_storage_bulk_in(u8_t ep,
+static void mass_storage_bulk_in(uint8_t ep,
 				 enum usb_dc_ep_cb_status_code ep_status);
 
 /* Describe EndPoints configuration */
@@ -162,12 +170,12 @@ static struct CBW cbw;
 static struct CSW csw;
 
 /*addr where will be read or written data*/
-static u32_t addr;
+static uint32_t addr;
 
 /*length of a reading or writing*/
-static u32_t length;
+static uint32_t length;
 
-static u8_t max_lun_count;
+static uint8_t max_lun_count;
 
 /*memory OK (after a memoryVerify)*/
 static bool memOK;
@@ -189,14 +197,14 @@ static void msd_init(void)
 static void sendCSW(void)
 {
 	csw.Signature = CSW_Signature;
-	if (usb_write(mass_ep_data[MSD_IN_EP_IDX].ep_addr, (u8_t *)&csw,
+	if (usb_write(mass_ep_data[MSD_IN_EP_IDX].ep_addr, (uint8_t *)&csw,
 		      sizeof(struct CSW), NULL) != 0) {
 		LOG_ERR("usb write failure");
 	}
 	stage = MSC_WAIT_CSW;
 }
 
-static bool write(u8_t *buf, u16_t size)
+static bool write(uint8_t *buf, uint16_t size)
 {
 	if (size >= cbw.DataLength) {
 		size = cbw.DataLength;
@@ -227,10 +235,10 @@ static bool write(u8_t *buf, u16_t size)
  * @return  0 on success, negative errno code on fail.
  */
 static int mass_storage_class_handle_req(struct usb_setup_packet *pSetup,
-					 s32_t *len, u8_t **data)
+					 int32_t *len, uint8_t **data)
 {
-	if (sys_le16_to_cpu(pSetup->wIndex) != mass_cfg.if0.bInterfaceNumber ||
-	    sys_le16_to_cpu(pSetup->wValue) != 0) {
+	if (pSetup->wIndex != mass_cfg.if0.bInterfaceNumber ||
+	    pSetup->wValue != 0) {
 		LOG_WRN("Invalid setup parameters");
 		return -EINVAL;
 	}
@@ -239,7 +247,7 @@ static int mass_storage_class_handle_req(struct usb_setup_packet *pSetup,
 	case MSC_REQUEST_RESET:
 		LOG_DBG("MSC_REQUEST_RESET");
 
-		if (sys_le16_to_cpu(pSetup->wLength)) {
+		if (pSetup->wLength) {
 			LOG_WRN("Invalid length");
 			return -EINVAL;
 		}
@@ -250,18 +258,18 @@ static int mass_storage_class_handle_req(struct usb_setup_packet *pSetup,
 	case MSC_REQUEST_GET_MAX_LUN:
 		LOG_DBG("MSC_REQUEST_GET_MAX_LUN");
 
-		if (sys_le16_to_cpu(pSetup->wLength) != 1) {
+		if (pSetup->wLength != 1) {
 			LOG_WRN("Invalid length");
 			return -EINVAL;
 		}
 
 		max_lun_count = 0U;
-		*data = (u8_t *)(&max_lun_count);
+		*data = (uint8_t *)(&max_lun_count);
 		*len = 1;
 		break;
 
 	default:
-		LOG_WRN("Unknown request 0x%x, value 0x%x",
+		LOG_WRN("Unknown request 0x%02x, value 0x%02x",
 			pSetup->bRequest, pSetup->wValue);
 		return -EINVAL;
 	}
@@ -287,7 +295,7 @@ static void testUnitReady(void)
 
 static bool requestSense(void)
 {
-	u8_t request_sense[] = {
+	uint8_t request_sense[] = {
 		0x70,
 		0x00,
 		0x05,   /* Sense Key: illegal request */
@@ -313,7 +321,7 @@ static bool requestSense(void)
 
 static bool inquiryRequest(void)
 {
-	u8_t inquiry[] = { 0x00, 0x80, 0x00, 0x01,
+	uint8_t inquiry[] = { 0x00, 0x80, 0x00, 0x01,
 	36 - 4, 0x80, 0x00, 0x00,
 	'Z', 'E', 'P', 'H', 'Y', 'R', ' ', ' ',
 	'Z', 'E', 'P', 'H', 'Y', 'R', ' ', 'U', 'S', 'B', ' ',
@@ -326,23 +334,23 @@ static bool inquiryRequest(void)
 
 static bool modeSense6(void)
 {
-	u8_t sense6[] = { 0x03, 0x00, 0x00, 0x00 };
+	uint8_t sense6[] = { 0x03, 0x00, 0x00, 0x00 };
 
 	return write(sense6, sizeof(sense6));
 }
 
 static bool readFormatCapacity(void)
 {
-	u8_t capacity[] = { 0x00, 0x00, 0x00, 0x08,
-			(u8_t)((block_count >> 24) & 0xff),
-			(u8_t)((block_count >> 16) & 0xff),
-			(u8_t)((block_count >> 8) & 0xff),
-			(u8_t)((block_count >> 0) & 0xff),
+	uint8_t capacity[] = { 0x00, 0x00, 0x00, 0x08,
+			(uint8_t)((block_count >> 24) & 0xff),
+			(uint8_t)((block_count >> 16) & 0xff),
+			(uint8_t)((block_count >> 8) & 0xff),
+			(uint8_t)((block_count >> 0) & 0xff),
 
 			0x02,
-			(u8_t)((BLOCK_SIZE >> 16) & 0xff),
-			(u8_t)((BLOCK_SIZE >> 8) & 0xff),
-			(u8_t)((BLOCK_SIZE >> 0) & 0xff),
+			(uint8_t)((BLOCK_SIZE >> 16) & 0xff),
+			(uint8_t)((BLOCK_SIZE >> 8) & 0xff),
+			(uint8_t)((BLOCK_SIZE >> 0) & 0xff),
 	};
 
 	return write(capacity, sizeof(capacity));
@@ -350,24 +358,17 @@ static bool readFormatCapacity(void)
 
 static bool readCapacity(void)
 {
-	u8_t capacity[] = {
-		(u8_t)(((block_count - 1) >> 24) & 0xff),
-		(u8_t)(((block_count - 1) >> 16) & 0xff),
-		(u8_t)(((block_count - 1) >> 8) & 0xff),
-		(u8_t)(((block_count - 1) >> 0) & 0xff),
+	uint8_t capacity[8];
 
-		(u8_t)((BLOCK_SIZE >> 24) & 0xff),
-		(u8_t)((BLOCK_SIZE >> 16) & 0xff),
-		(u8_t)((BLOCK_SIZE >> 8) & 0xff),
-		(u8_t)((BLOCK_SIZE >> 0) & 0xff),
-	};
+	sys_put_be32(block_count - 1, &capacity[0]);
+	sys_put_be32(BLOCK_SIZE, &capacity[4]);
 
 	return write(capacity, sizeof(capacity));
 }
 
 static void thread_memory_read_done(void)
 {
-	u32_t n;
+	uint32_t n;
 
 	n = (length > MAX_PACKET) ? MAX_PACKET : length;
 	if ((addr + n) > memory_size) {
@@ -395,7 +396,7 @@ static void thread_memory_read_done(void)
 
 static void memoryRead(void)
 {
-	u32_t n;
+	uint32_t n;
 
 	n = (length > MAX_PACKET) ? MAX_PACKET : length;
 	if ((addr + n) > memory_size) {
@@ -424,15 +425,37 @@ static void memoryRead(void)
 	}
 }
 
+static bool check_cbw_data_length(void)
+{
+	if (!cbw.DataLength) {
+		LOG_WRN("Zero length in CBW");
+		csw.Status = CSW_FAILED;
+		sendCSW();
+		return false;
+	}
+
+	return true;
+}
+
 static bool infoTransfer(void)
 {
-	u32_t n;
+	uint32_t n;
+
+	if (!check_cbw_data_length()) {
+		return false;
+	}
 
 	/* Logical Block Address of First Block */
-	n = (cbw.CB[2] << 24) | (cbw.CB[3] << 16) | (cbw.CB[4] <<  8) |
-				 (cbw.CB[5] <<  0);
+	n = sys_get_be32(&cbw.CB[2]);
 
 	LOG_DBG("LBA (block) : 0x%x ", n);
+	if ((n * BLOCK_SIZE) >= memory_size) {
+		LOG_ERR("LBA out of range");
+		csw.Status = CSW_FAILED;
+		sendCSW();
+		return false;
+	}
+
 	addr = n * BLOCK_SIZE;
 
 	/* Number of Blocks to transfer */
@@ -440,25 +463,17 @@ static bool infoTransfer(void)
 	case READ10:
 	case WRITE10:
 	case VERIFY10:
-		n = (cbw.CB[7] <<  8) | (cbw.CB[8] <<  0);
+		n = sys_get_be16(&cbw.CB[7]);
 		break;
 
 	case READ12:
 	case WRITE12:
-		n = (cbw.CB[6] << 24) | (cbw.CB[7] << 16) |
-			(cbw.CB[8] <<  8) | (cbw.CB[9] <<  0);
+		n = sys_get_be32(&cbw.CB[6]);
 		break;
 	}
 
 	LOG_DBG("Size (block) : 0x%x ", n);
 	length = n * BLOCK_SIZE;
-
-	if (!cbw.DataLength) {              /* host requests no data*/
-		LOG_WRN("Zero length in CBW");
-		csw.Status = CSW_FAILED;
-		sendCSW();
-		return false;
-	}
 
 	if (cbw.DataLength != length) {
 		if ((cbw.Flags & 0x80) != 0U) {
@@ -479,18 +494,23 @@ static bool infoTransfer(void)
 
 static void fail(void)
 {
+	if (cbw.DataLength) {
+		/* Stall data stage */
+		usb_ep_set_stall(mass_ep_data[MSD_IN_EP_IDX].ep_addr);
+	}
+
 	csw.Status = CSW_FAILED;
 	sendCSW();
 }
 
-static void CBWDecode(u8_t *buf, u16_t size)
+static void CBWDecode(uint8_t *buf, uint16_t size)
 {
 	if (size != sizeof(cbw)) {
 		LOG_ERR("size != sizeof(cbw)");
 		return;
 	}
 
-	memcpy((u8_t *)&cbw, buf, size);
+	memcpy((uint8_t *)&cbw, buf, size);
 	if (cbw.Signature != CBW_Signature) {
 		LOG_ERR("CBW Signature Mismatch");
 		return;
@@ -510,23 +530,33 @@ static void CBWDecode(u8_t *buf, u16_t size)
 			break;
 		case REQUEST_SENSE:
 			LOG_DBG(">> REQ_SENSE");
-			requestSense();
+			if (check_cbw_data_length()) {
+				requestSense();
+			}
 			break;
 		case INQUIRY:
 			LOG_DBG(">> INQ");
-			inquiryRequest();
+			if (check_cbw_data_length()) {
+				inquiryRequest();
+			}
 			break;
 		case MODE_SENSE6:
 			LOG_DBG(">> MODE_SENSE6");
-			modeSense6();
+			if (check_cbw_data_length()) {
+				modeSense6();
+			}
 			break;
 		case READ_FORMAT_CAPACITIES:
 			LOG_DBG(">> READ_FORMAT_CAPACITY");
-			readFormatCapacity();
+			if (check_cbw_data_length()) {
+				readFormatCapacity();
+			}
 			break;
 		case READ_CAPACITY:
 			LOG_DBG(">> READ_CAPACITY");
-			readCapacity();
+			if (check_cbw_data_length()) {
+				readCapacity();
+			}
 			break;
 		case READ10:
 		case READ12:
@@ -593,9 +623,9 @@ static void CBWDecode(u8_t *buf, u16_t size)
 
 }
 
-static void memoryVerify(u8_t *buf, u16_t size)
+static void memoryVerify(uint8_t *buf, uint16_t size)
 {
-	u32_t n;
+	uint32_t n;
 
 	if ((addr + size) > memory_size) {
 		size = memory_size - addr;
@@ -633,7 +663,7 @@ static void memoryVerify(u8_t *buf, u16_t size)
 	}
 }
 
-static void memoryWrite(u8_t *buf, u16_t size)
+static void memoryWrite(uint8_t *buf, uint16_t size)
 {
 	if ((addr + size) > memory_size) {
 		size = memory_size - addr;
@@ -648,7 +678,7 @@ static void memoryWrite(u8_t *buf, u16_t size)
 	}
 
 	/* if the array is filled, write it in memory */
-	if (!((addr + size) % BLOCK_SIZE)) {
+	if ((addr % BLOCK_SIZE) + size >= BLOCK_SIZE) {
 		if (!(disk_access_status(disk_pdrv) &
 					DISK_STATUS_WR_PROTECT)) {
 			LOG_DBG("Disk WRITE Qd %d", (addr/BLOCK_SIZE));
@@ -670,11 +700,11 @@ static void memoryWrite(u8_t *buf, u16_t size)
 }
 
 
-static void mass_storage_bulk_out(u8_t ep,
+static void mass_storage_bulk_out(uint8_t ep,
 		enum usb_dc_ep_cb_status_code ep_status)
 {
-	u32_t bytes_read = 0U;
-	u8_t bo_buf[CONFIG_MASS_STORAGE_BULK_EP_MPS];
+	uint32_t bytes_read = 0U;
+	uint8_t bo_buf[CONFIG_MASS_STORAGE_BULK_EP_MPS];
 
 	ARG_UNUSED(ep_status);
 
@@ -725,7 +755,12 @@ static void mass_storage_bulk_out(u8_t ep,
 
 static void thread_memory_write_done(void)
 {
-	u32_t size = defered_wr_sz;
+	uint32_t size = defered_wr_sz;
+	size_t overflowed_len = (addr + size) % CONFIG_MASS_STORAGE_BULK_EP_MPS;
+
+	if (overflowed_len) {
+		memmove(page, &page[BLOCK_SIZE], overflowed_len);
+	}
 
 	addr += size;
 	length -= size;
@@ -750,7 +785,7 @@ static void thread_memory_write_done(void)
  *
  * @return  N/A.
  */
-static void mass_storage_bulk_in(u8_t ep,
+static void mass_storage_bulk_in(uint8_t ep,
 				 enum usb_dc_ep_cb_status_code ep_status)
 {
 	ARG_UNUSED(ep_status);
@@ -803,7 +838,7 @@ static void mass_storage_bulk_in(u8_t ep,
  */
 static void mass_storage_status_cb(struct usb_cfg_data *cfg,
 				   enum usb_dc_status_code status,
-				   const u8_t *param)
+				   const uint8_t *param)
 {
 	ARG_UNUSED(param);
 	ARG_UNUSED(cfg);
@@ -846,7 +881,7 @@ static void mass_storage_status_cb(struct usb_cfg_data *cfg,
 }
 
 static void mass_interface_config(struct usb_desc_header *head,
-				  u8_t bInterfaceNumber)
+				  uint8_t bInterfaceNumber)
 {
 	ARG_UNUSED(head);
 
@@ -913,7 +948,7 @@ static void mass_thread_main(int arg1, int unused)
  */
 static int mass_storage_init(struct device *dev)
 {
-	u32_t block_size = 0U;
+	uint32_t block_size = 0U;
 
 	ARG_UNUSED(dev);
 
@@ -956,6 +991,8 @@ static int mass_storage_init(struct device *dev)
 			DISK_THREAD_STACK_SZ,
 			(k_thread_entry_t)mass_thread_main, NULL, NULL, NULL,
 			DISK_THREAD_PRIO, 0, K_NO_WAIT);
+
+	k_thread_name_set(&mass_thread_data, "usb_mass");
 
 	return 0;
 }

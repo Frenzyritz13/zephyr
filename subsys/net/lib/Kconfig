@@ -1,8 +1,5 @@
-#
 # Copyright (c) 2016 Intel Corporation
-#
 # SPDX-License-Identifier: Apache-2.0
-#
 
 menu "Network Protocols"
 
@@ -11,6 +8,8 @@ source "subsys/net/lib/coap/Kconfig"
 source "subsys/net/lib/dns/Kconfig"
 
 source "subsys/net/lib/mqtt/Kconfig"
+
+source "subsys/net/lib/tftp/Kconfig"
 
 source "subsys/net/lib/http/Kconfig"
 

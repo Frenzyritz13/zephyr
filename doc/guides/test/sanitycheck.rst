@@ -1,4 +1,3 @@
-
 .. _sanitycheck_script:
 
 Sanity Tests
@@ -13,7 +12,7 @@ boards and will run in an emulated environment if available for the
 architecture or configuration being tested.
 
 In normal use, sanitycheck runs a limited set of kernel tests (inside
-an emulator).  Because of its limited text execution coverage, sanitycheck
+an emulator).  Because of its limited test execution coverage, sanitycheck
 cannot guarantee local changes will succeed in the full build
 environment, but it does sufficient testing by building samples and
 tests for different boards and different configurations to help keep the
@@ -92,7 +91,6 @@ required for best test coverage for this specific board:
     - gpio
     - usb_device
     - watchdog
-    - hwinfo
     - can
     - pwm
   testing:
@@ -105,9 +103,9 @@ identifier:
   ``cmake``::
 
      # with west
-     west build -b tinytile
+     west build -b reel_board
      # with cmake
-     cmake -DBOARD=tinytile ..
+     cmake -DBOARD=reel_board ..
 
 name:
   The actual name of the board as it appears in marketing material.
@@ -156,15 +154,44 @@ testing:
   ignore_tags:
     Do not attempt to build (and therefore run) tests marked with this list of
     tags.
+  only_tags:
+    Only execute tests with this list of tags on a specific platform.
 
 Test Cases
 **********
 
 Test cases are detected by the presence of a 'testcase.yaml' or a 'sample.yaml'
 files in the application's project directory. This file may contain one or more
-entries in the test section each identifying a test scenario. The name of
-the test case only needs to be unique for the test cases specified in
-that testcase meta-data.
+entries in the test section each identifying a test scenario.
+
+The name of each testcase needs to be unique in the context of the overall
+testsuite and has to follow basic rules:
+
+#. The format of the test identifier shall be a string without any spaces or
+   special characters (allowed characters: alphanumric and [\_=]) consisting of
+   multiple sections delimited with a dot (.).
+
+#. Each test identifier shall start with a section followed by a subsection
+   separated by a dot. For example, a test that covers semaphores in the kernel
+   shall start with ``kernel.sempahore``.
+
+#. All test identifiers within a testcase.yaml file need to be unique. For
+   example a testcase.yaml file covering semaphores in the kernel can have:
+
+   * ``kernel.semaphore``: For general semaphore tests
+   * ``kernel.semaphore.stress``: Stress testng semaphores in the kernel.
+
+#. Depending on the nature of the test, an identifier can consist of at least
+   two sections:
+
+   * Ztest tests: The individual testcases in the ztest testsuite will be
+     concatenated to identifier in the testcase.yaml file generating unique
+     identifiers for every testcase in the suite.
+
+   * Standalone tests and samples: This type of test should at least have 3
+     sections in the test identifier in the testcase.yaml (or sample.yaml) file.
+     The last section of the name shall signify the test itself.
+
 
 Test cases are written using the YAML syntax and share the same structure as
 samples. The following is an example test with a few options that are
@@ -174,11 +201,11 @@ explained in this document.
 ::
 
         tests:
-          test:
+          bluetooth.gatt:
             build_only: true
             platform_whitelist: qemu_cortex_m3 qemu_x86
             tags: bluetooth
-          test_br:
+          bluetooth.gatt.br:
             build_only: true
             extra_args: CONF_FILE="prj_br.conf"
             filter: not CONFIG_DEBUG
@@ -196,11 +223,11 @@ related to the sample and what is being demonstrated:
           name: hello world
           description: Hello World sample, the simplest Zephyr application
         tests:
-          test:
+          sample.basic.hello_world:
             build_only: true
             tags: tests
             min_ram: 16
-          singlethread:
+          sample.basic.hello_world.singlethread:
             build_only: true
             extra_args: CONF_FILE=prj_single.conf
             filter: not CONFIG_BT
@@ -289,8 +316,9 @@ extra_sections: <list of extra binary sections>
     here. They will not be included in the size calculation.
 
 harness: <string>
-    A harness string needed to run the tests successfully. This can be as simple as
-    a loopback wiring or a complete hardware test setup for sensor and IO testing.
+    A harness string needed to run the tests successfully. This can be as
+    simple as a loopback wiring or a complete hardware test setup for
+    sensor and IO testing.
     Usually pertains to external dependency domains but can be anything such as
     console, sensor, net, keyboard, or Bluetooth.
 
@@ -328,8 +356,9 @@ harness_config: <harness configuration options>
         specific test setup and board selection logic to pick the particular
         board(s) out of multiple boards that fulfill the dependency in an
         automation setup based on "fixture" keyword. Some sample fixture names
-        are fixture_i2c_hts221, fixture_i2c_bme280, fixture_i2c_FRAM,
-        fixture_ble_fw and fixture_gpio_loop.
+        are i2c_hts221, i2c_bme280, i2c_FRAM, ble_fw and gpio_loop.
+
+        Only one fixture can be defined per testcase.
 
     The following is an example yaml file with a few harness_config options.
 
@@ -346,7 +375,7 @@ harness_config: <harness configuration options>
              regex:
                - "Temperature:(.*)C"
                - "Relative Humidity:(.*)%"
-             fixture: fixture_i2c_hts221
+             fixture: i2c_hts221
          tests:
            test:
              tags: sensors
@@ -418,8 +447,9 @@ filter: <expression>
 
 The set of test cases that actually run depends on directives in the testcase
 filed and options passed in on the command line. If there is any confusion,
-running with -v or --discard-report can help show why particular test cases
-were skipped.
+running with -v or examining the discard report
+(:file:`sanitycheck_discard.csv`) can help show why particular test cases were
+skipped.
 
 Metrics (such as pass/fail state and binary size) for the last code
 release are stored in scripts/sanity_chk/sanity_last_release.csv.
@@ -484,7 +514,7 @@ devices, for example::
 Any options marked as 'unknown' need to be changed and set with the correct
 values, in the above example both the platform names and the runners need to be
 replaced with the correct values corresponding to the connected hardware. In
-this example we are using a reel_board and an nrf52840_pca10056::
+this example we are using a reel_board and an nrf52840dk_nrf52840::
 
   - available: true
     id: OSHW000032254e4500128002ab98002784d1000097969900
@@ -494,7 +524,7 @@ this example we are using a reel_board and an nrf52840_pca10056::
     serial: /dev/cu.usbmodem146114202
   - available: true
     id: 000683759358
-    platform: nrf52840_pca10056
+    platform: nrf52840dk_nrf52840
     product: J-Link
     runner: nrfjprog
     serial: /dev/cu.usbmodem0006837593581
@@ -518,6 +548,70 @@ on those platforms.
   with the hardware map features. Boards that require other runners to flash the
   Zephyr binary are still work in progress.
 
-To produce test reports, use the ``--detailed-report FILENAME`` option which will
-generate an XML file using the JUNIT syntax. This file can be used to generate
-other reports, for example using ``junit2html`` which can be installed via PIP.
+Fixtures
++++++++++
+
+Some tests require additional setup or special wiring specific to the test.
+Running the tests without this setup or test fixture may fail. A testcase can
+specify the fixture it needs which can then be matched with hardware capability
+of a board and the fixtures it supports via the command line or using the hardware
+map file.
+
+Fixtures are defined in the hardware map file as a list::
+
+      - available: true
+        connected: true
+        fixtures:
+          - gpio_loopback
+        id: 0240000026334e450015400f5e0e000b4eb1000097969900
+        platform: frdm_k64f
+        product: DAPLink CMSIS-DAP
+        runner: pyocd
+        serial: /dev/ttyACM9
+
+When running `sanitycheck` with ``--device-testing``, the configured fixture
+in the hardware map file will be matched to testcases requesting the same fixtures
+and these tests will be executed on the boards that provide this fixture.
+
+.. figure:: fixtures.svg
+   :figclass: align-center
+
+Notes
++++++
+
+It may be useful to annotate board descriptions in the hardware map file
+with additional information.  Use the "notes" keyword to do this.  For
+example::
+
+    - available: true
+      connected: false
+      fixtures:
+        - gpio_loopback
+      id: 000683290670
+      notes: An nrf5340pdk_nrf5340 is detected as an nrf52840dk_nrf52840 with no serial
+        port, and three serial ports with an unknown platform.  The board id of the serial
+        ports is not the same as the board id of the the development kit.  If you regenerate
+        this file you will need to update serial to reference the third port, and platform
+        to nrf5340pdk_nrf5340_cpuapp or another supported board target.
+      platform: nrf52840dk_nrf52840
+      product: J-Link
+      runner: jlink
+      serial: null
+
+Overriding Board Identifier
++++++++++++++++++++++++++++
+
+When (re-)generated the hardware map file will contain an "id" keyword
+that serves as the argument to ``--board-id`` when flashing.  In some
+cases the detected ID is not the correct one to use, for example when
+using an external J-Link probe.  The "probe_id" keyword overrides the
+"id" keyword for this purpose.   For example::
+
+    - available: true
+      connected: false
+      id: 0229000005d9ebc600000000000000000000000097969905
+      platform: mimxrt1060_evk
+      probe_id: 000609301751
+      product: DAPLink CMSIS-DAP
+      runner: jlink
+      serial: null

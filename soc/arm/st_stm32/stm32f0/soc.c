@@ -12,7 +12,7 @@
 #include <device.h>
 #include <init.h>
 #include <arch/cpu.h>
-#include <cortex_m/exc.h>
+#include <arch/arm/aarch32/cortex_m/cmsis.h>
 #include <linker/linker-defs.h>
 #include <string.h>
 
@@ -56,7 +56,7 @@ void relocate_vector_table(void)
  */
 static int stm32f0_init(struct device *arg)
 {
-	u32_t key;
+	uint32_t key;
 
 	ARG_UNUSED(arg);
 

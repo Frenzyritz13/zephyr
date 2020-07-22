@@ -18,6 +18,7 @@
 #include <net/buf.h>
 #include <net/net_ip.h>
 #include <sys/ring_buffer.h>
+#include <drivers/gpio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,9 +33,9 @@ extern "C" {
 struct modem_iface {
 	struct device *dev;
 
-	int (*read)(struct modem_iface *iface, u8_t *buf, size_t size,
+	int (*read)(struct modem_iface *iface, uint8_t *buf, size_t size,
 		    size_t *bytes_read);
-	int (*write)(struct modem_iface *iface, const u8_t *buf, size_t size);
+	int (*write)(struct modem_iface *iface, const uint8_t *buf, size_t size);
 
 	/* implementation data */
 	void *iface_data;
@@ -51,8 +52,8 @@ struct modem_cmd_handler {
 struct modem_pin {
 	struct device *gpio_port_dev;
 	char *dev_name;
-	u32_t pin;
-	int init_flags;
+	gpio_pin_t pin;
+	gpio_flags_t init_flags;
 };
 
 struct modem_context {
@@ -94,7 +95,7 @@ char *modem_context_sprint_ip_addr(const struct sockaddr *addr);
  *
  * @retval 0 if ok, < 0 if error.
  */
-int modem_context_get_addr_port(const struct sockaddr *addr, u16_t *port);
+int modem_context_get_addr_port(const struct sockaddr *addr, uint16_t *port);
 
 /**
  * @brief  Gets modem context by id.
@@ -126,9 +127,9 @@ struct modem_context *modem_context_from_iface_dev(struct device *dev);
 int modem_context_register(struct modem_context *ctx);
 
 /* pin config functions */
-int modem_pin_read(struct modem_context *ctx, u32_t pin);
-int modem_pin_write(struct modem_context *ctx, u32_t pin, u32_t value);
-int modem_pin_config(struct modem_context *ctx, u32_t pin, int flags);
+int modem_pin_read(struct modem_context *ctx, uint32_t pin);
+int modem_pin_write(struct modem_context *ctx, uint32_t pin, uint32_t value);
+int modem_pin_config(struct modem_context *ctx, uint32_t pin, bool enable);
 int modem_pin_init(struct modem_context *ctx);
 
 #ifdef __cplusplus

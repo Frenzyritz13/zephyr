@@ -132,16 +132,29 @@
 #define __syscall
 #endif /* #ifndef ZTEST_UNITTEST */
 
+/* Definitions for struct declaration tags. These are sentinel values used by
+ * parse_syscalls.py to gather a list of names of struct declarations that
+ * have these tags applied for them.
+ */
+
+/* Indicates this is a driver subsystem */
+#define __subsystem
+
+/* Indicates this is a network socket object */
+#define __net_socket
+
 #ifndef BUILD_ASSERT
-/* compile-time assertion that makes the build fail */
-#define BUILD_ASSERT(EXPR) \
+/* Compile-time assertion that makes the build to fail.
+ * Common implementation swallows the message.
+ */
+#define BUILD_ASSERT(EXPR, MSG...) \
 	enum _CONCAT(__build_assert_enum, __COUNTER__) { \
 		_CONCAT(__build_assert, __COUNTER__) = 1 / !!(EXPR) \
 	}
 #endif
+
 #ifndef BUILD_ASSERT_MSG
-/* build assertion with message -- common implementation swallows message. */
-#define BUILD_ASSERT_MSG(EXPR, MSG) BUILD_ASSERT(EXPR)
+#define BUILD_ASSERT_MSG(EXPR, MSG) __DEPRECATED_MACRO BUILD_ASSERT(EXPR, MSG)
 #endif
 
 /*
@@ -167,10 +180,21 @@
  * Convenience helper combining __in_section() and Z_DECL_ALIGN().
  * The section name is the struct type prepended with an underscore.
  * The subsection is "static" and the subsubsection is the variable name.
+ *
+ * In the linker script, create output sections for these using
+ * Z_ITERABLE_SECTION_ROM or Z_ITERABLE_SECTION_RAM.
  */
 #define Z_STRUCT_SECTION_ITERABLE(struct_type, name) \
 	Z_DECL_ALIGN(struct struct_type) name \
 	__in_section(_##struct_type, static, name) __used
+
+/* Special variant of Z_STRUCT_SECTION_ITERABLE, for placing alternate
+ * data types within the iterable section of a specific data type. The
+ * data type sizes and semantics must be equivalent!
+ */
+#define Z_STRUCT_SECTION_ITERABLE_ALTERNATE(out_type, struct_type, name) \
+	Z_DECL_ALIGN(struct struct_type) name \
+	__in_section(_##out_type, static, name) __used
 
 /*
  * Itterator for structure instances gathered by Z_STRUCT_SECTION_ITERABLE().

@@ -23,6 +23,7 @@
 		led0 = &led0;
 		led1 = &led1;
 		led2 = &led2;
+		pwm-led0 = &pwm_led0;
 	};
 
 	leds {
@@ -41,6 +42,13 @@
 		};
 	};
 
+	pwmleds {
+		compatible = "pwm-leds";
+
+		pwm_led0: pwm_led_0 {
+			pwms = <&tcc2 1>;
+		};
+	};
 };
 
 &cpu0 {
@@ -72,6 +80,15 @@
 	#size-cells = <0>;
 };
 
+&tcc2 {
+	status = "okay";
+	compatible = "atmel,sam0-tcc-pwm";
+	/* Gives a maximum period of 1.4 s */
+	prescaler = <1024>;
+
+	#pwm-cells = <1>;
+};
+
 &flash0 {
 	partitions {
 		compatible = "fixed-partitions";
@@ -79,8 +96,9 @@
 		#size-cells = <1>;
 
 		/*
-		 * The final 16 KiB is reserved for the application
-		 * and is used by NFFS if enabled.
+		 * The final 16 KiB is reserved for the application.
+		 * Storage partition will be used by FCB/LittleFS/NVS
+		 * if enabled.
 		 */
 		storage_partition: partition@3c000 {
 			label = "storage";

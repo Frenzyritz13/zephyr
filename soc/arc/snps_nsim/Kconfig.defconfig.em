@@ -1,8 +1,5 @@
-#
 # Copyright (c) 2018 Synopsys, Inc. All rights reserved.
-#
 # SPDX-License-Identifier: Apache-2.0
-#
 
 if SOC_NSIM_EM
 
@@ -47,12 +44,9 @@ config MAIN_STACK_SIZE
 config IDLE_STACK_SIZE
 	default 2048
 
-if ZTEST
-
 config ZTEST_STACKSIZE
 	default 2048
-
-endif # ZTEST
+	depends on ZTEST
 
 endif # ARC_MPU_VER
 

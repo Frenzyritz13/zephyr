@@ -23,10 +23,10 @@ struct flash_sector fcb_small_sectors[2] = {
 
 struct deletable_s {
 	bool valid;
-	u32_t val32;
+	uint32_t val32;
 } deletable_val;
 
-u32_t val4v2;
+uint32_t val4v2;
 
 int c4_handle_export(int (*cb)(const char *name, const void *value, size_t val_len));
 
@@ -128,4 +128,3 @@ void test_config_compress_deleted(void)
 	rc = fcb_walk(&cf.cf_fcb, &fcb_small_sectors[1], check_compressed_cb,
 		      NULL);
 }
-

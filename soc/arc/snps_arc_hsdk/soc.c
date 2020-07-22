@@ -1,4 +1,3 @@
-
 /*
  * Copyright (c) 2019 Synopsys, Inc. All rights reserved.
  *
@@ -17,8 +16,8 @@ static int arc_hsdk_init(struct device *dev)
 {
 	ARG_UNUSED(dev);
 
-	u32_t core;
-	u32_t i;
+	uint32_t core;
+	uint32_t i;
 
 	/* allocate all IDU interrupts to master core */
 	core = z_arc_v2_core_id();

@@ -25,12 +25,12 @@ extern void z_cstart(void);
  */
 void __attribute__((section(".iram1"))) __start(void)
 {
-	volatile u32_t *wdt_rtc_reg = (u32_t *)RTC_CNTL_WDTCONFIG0_REG;
-	volatile u32_t *wdt_timg_reg = (u32_t *)TIMG_WDTCONFIG0_REG(0);
-	volatile u32_t *app_cpu_config_reg = (u32_t *)DPORT_APPCPU_CTRL_B_REG;
-	extern u32_t _init_start;
-	extern u32_t _bss_start;
-	extern u32_t _bss_end;
+	volatile uint32_t *wdt_rtc_reg = (uint32_t *)RTC_CNTL_WDTCONFIG0_REG;
+	volatile uint32_t *wdt_timg_reg = (uint32_t *)TIMG_WDTCONFIG0_REG(0);
+	volatile uint32_t *app_cpu_config_reg = (uint32_t *)DPORT_APPCPU_CTRL_B_REG;
+	extern uint32_t _init_start;
+	extern uint32_t _bss_start;
+	extern uint32_t _bss_end;
 
 	/* Move the exception vector table to IRAM. */
 	__asm__ __volatile__ (
@@ -64,7 +64,7 @@ void __attribute__((section(".iram1"))) __start(void)
 
 	/* Initialize the architecture CPU pointer.  Some of the
 	 * initialization code wants a valid _current before
-	 * z_arch_kernel_init() is invoked.
+	 * arch_kernel_init() is invoked.
 	 */
 	__asm__ volatile("wsr.MISC0 %0; rsync" : : "r"(&_kernel.cpus[0]));
 
@@ -76,7 +76,7 @@ void __attribute__((section(".iram1"))) __start(void)
 }
 
 /* Boot-time static default printk handler, possibly to be overridden later. */
-int z_arch_printk_char_out(int c)
+int arch_printk_char_out(int c)
 {
 	if (c == '\n') {
 		esp32_rom_uart_tx_one_char('\r');

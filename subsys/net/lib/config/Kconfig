@@ -1,10 +1,7 @@
-# Kconfig - Options for networking configuration
+# Options for networking configuration
 
-#
 # Copyright (c) 2017 Intel Corporation.
-#
 # SPDX-License-Identifier: Apache-2.0
-#
 
 config NET_CONFIG_AUTO_INIT
 	bool "Init networking support automatically during device startup"
@@ -119,14 +116,11 @@ config NET_CONFIG_PEER_IPV4_ADDR
 
 endif # NET_IPV4
 
-if NET_L2_IEEE802154 || IEEE802154_RAW_MODE || NET_L2_OPENTHREAD
-
 config NET_CONFIG_IEEE802154_DEV_NAME
 	string "IEEE 802.15.4 device name"
+	depends on NET_L2_IEEE802154 || IEEE802154_RAW_MODE || NET_L2_OPENTHREAD
 	help
 	  The device name to get bindings from in the sample application.
-
-endif # NET_L2_IEEE802154 || IEEE802154_RAW_MODE || NET_L2_OPENTHREAD
 
 if NET_L2_IEEE802154 || IEEE802154_RAW_MODE
 
@@ -183,16 +177,13 @@ config NET_CONFIG_IEEE802154_SECURITY_LEVEL
 
 endif # NET_L2_IEEE802154 || IEEE802154_RAW_MODE
 
-if NET_L2_BT
-
 config NET_CONFIG_BT_NODE
 	bool "Enable Bluetooth node support"
+	depends on NET_L2_BT
 	select NET_L2_BT_MGMT
 	help
 	  Enables application to operate in node mode which requires GATT
 	  service to be registered and start advertising as peripheral.
-
-endif # NET_L2_BT
 
 endif # NET_CONFIG_SETTINGS
 

@@ -1,4 +1,3 @@
 tests:
-  kernel.context:
+  kernel.common:
     tags: kernel
-    min_ram: 20

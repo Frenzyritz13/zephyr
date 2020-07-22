@@ -48,8 +48,8 @@ static struct bt_uuid_128 smp_bt_chr_uuid = BT_UUID_INIT_128(
  */
 static ssize_t smp_bt_chr_write(struct bt_conn *conn,
 				const struct bt_gatt_attr *attr,
-				const void *buf, u16_t len, u16_t offset,
-				u8_t flags)
+				const void *buf, uint16_t len, uint16_t offset,
+				uint8_t flags)
 {
 	struct smp_bt_user_data *ud;
 	struct net_buf *nb;
@@ -65,7 +65,7 @@ static ssize_t smp_bt_chr_write(struct bt_conn *conn,
 	return len;
 }
 
-static void smp_bt_ccc_changed(const struct bt_gatt_attr *attr, u16_t value)
+static void smp_bt_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
 }
 
@@ -76,9 +76,19 @@ static struct bt_gatt_attr smp_bt_attrs[] = {
 	BT_GATT_CHARACTERISTIC(&smp_bt_chr_uuid.uuid,
 			       BT_GATT_CHRC_WRITE_WITHOUT_RESP |
 			       BT_GATT_CHRC_NOTIFY,
+#ifdef CONFIG_MCUMGR_SMP_BT_AUTHEN
+			       BT_GATT_PERM_WRITE_AUTHEN,
+#else
 			       BT_GATT_PERM_WRITE,
+#endif
 			       NULL, smp_bt_chr_write, NULL),
-	BT_GATT_CCC(smp_bt_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+	BT_GATT_CCC(smp_bt_ccc_changed,
+#ifdef CONFIG_MCUMGR_SMP_BT_AUTHEN
+			       BT_GATT_PERM_READ_AUTHEN |
+			       BT_GATT_PERM_WRITE_AUTHEN),
+#else
+			       BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+#endif
 };
 
 static struct bt_gatt_service smp_bt_svc = BT_GATT_SERVICE(smp_bt_attrs);
@@ -86,7 +96,7 @@ static struct bt_gatt_service smp_bt_svc = BT_GATT_SERVICE(smp_bt_attrs);
 /**
  * Transmits an SMP response over the specified Bluetooth connection.
  */
-static int smp_bt_tx_rsp(struct bt_conn *conn, const void *data, u16_t len)
+static int smp_bt_tx_rsp(struct bt_conn *conn, const void *data, uint16_t len)
 {
 	return bt_gatt_notify(conn, smp_bt_attrs + 2, data, len);
 }
@@ -109,10 +119,10 @@ static struct bt_conn *smp_bt_conn_from_pkt(const struct net_buf *nb)
  * Calculates the maximum fragment size to use when sending the specified
  * response packet.
  */
-static u16_t smp_bt_get_mtu(const struct net_buf *nb)
+static uint16_t smp_bt_get_mtu(const struct net_buf *nb)
 {
 	struct bt_conn *conn;
-	u16_t mtu;
+	uint16_t mtu;
 
 	conn = smp_bt_conn_from_pkt(nb);
 	if (conn == NULL) {

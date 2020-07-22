@@ -59,10 +59,10 @@ static inline struct net_route_nexthop *net_nexthop_data(struct net_nbr *nbr)
 
 static inline struct net_nbr *get_nexthop_nbr(struct net_nbr *start, int idx)
 {
-	NET_ASSERT_INFO(idx < CONFIG_NET_MAX_NEXTHOPS, "idx %d >= max %d",
-			idx, CONFIG_NET_MAX_NEXTHOPS);
+	NET_ASSERT(idx < CONFIG_NET_MAX_NEXTHOPS, "idx %d >= max %d",
+		   idx, CONFIG_NET_MAX_NEXTHOPS);
 
-	return (struct net_nbr *)((u8_t *)start +
+	return (struct net_nbr *)((uint8_t *)start +
 			((sizeof(struct net_nbr) + start->size) * idx));
 }
 
@@ -131,7 +131,7 @@ struct net_nbr *net_route_get_nbr(struct net_route_entry *route)
 			continue;
 		}
 
-		if (nbr->data == (u8_t *)route) {
+		if (nbr->data == (uint8_t *)route) {
 			if (!nbr->ref) {
 				return NULL;
 			}
@@ -177,7 +177,7 @@ static inline void nbr_free(struct net_nbr *nbr)
 
 static struct net_nbr *nbr_new(struct net_if *iface,
 			       struct in6_addr *addr,
-			       u8_t prefix_len)
+			       uint8_t prefix_len)
 {
 	struct net_nbr *nbr = net_nbr_get(&net_nbr_routes.table);
 
@@ -212,9 +212,9 @@ static struct net_nbr *nbr_nexthop_get(struct net_if *iface,
 		return NULL;
 	}
 
-	NET_ASSERT_INFO(nbr->idx != NET_NBR_LLADDR_UNKNOWN,
-			"Nexthop %s not in neighbor cache!",
-			log_strdup(net_sprint_ipv6_addr(addr)));
+	NET_ASSERT(nbr->idx != NET_NBR_LLADDR_UNKNOWN,
+		   "Nexthop %s not in neighbor cache!",
+		   log_strdup(net_sprint_ipv6_addr(addr)));
 
 	net_nbr_ref(nbr);
 
@@ -242,7 +242,7 @@ static int nbr_nexthop_put(struct net_nbr *nbr)
 	if (CONFIG_NET_ROUTE_LOG_LEVEL >= LOG_LEVEL_DBG) {		\
 		struct in6_addr *naddr = net_route_get_nexthop(route);	\
 									\
-		NET_ASSERT_INFO(naddr, "Unknown nexthop address");	\
+		NET_ASSERT(naddr, "Unknown nexthop address");	\
 									\
 		NET_DBG("%s route to %s via %s (iface %p)", str,	\
 			log_strdup(net_sprint_ipv6_addr(dst)),		\
@@ -261,7 +261,7 @@ struct net_route_entry *net_route_lookup(struct net_if *iface,
 					 struct in6_addr *dst)
 {
 	struct net_route_entry *route, *found = NULL;
-	u8_t longest_match = 0U;
+	uint8_t longest_match = 0U;
 	int i;
 
 	for (i = 0; i < CONFIG_NET_MAX_ROUTES && longest_match < 128; i++) {
@@ -278,8 +278,8 @@ struct net_route_entry *net_route_lookup(struct net_if *iface,
 		route = net_route_data(nbr);
 
 		if (route->prefix_len >= longest_match &&
-		    net_ipv6_is_prefix((u8_t *)dst,
-				       (u8_t *)&route->addr,
+		    net_ipv6_is_prefix((uint8_t *)dst,
+				       (uint8_t *)&route->addr,
 				       route->prefix_len)) {
 			found = route;
 			longest_match = route->prefix_len;
@@ -297,7 +297,7 @@ struct net_route_entry *net_route_lookup(struct net_if *iface,
 
 struct net_route_entry *net_route_add(struct net_if *iface,
 				      struct in6_addr *addr,
-				      u8_t prefix_len,
+				      uint8_t prefix_len,
 				      struct in6_addr *nexthop)
 {
 	struct net_linkaddr_storage *nexthop_lladdr;
@@ -695,9 +695,9 @@ bool net_route_mcast_del(struct net_route_entry_mcast *route)
 		return false;
 	}
 
-	NET_ASSERT_INFO(route->is_used,
-			"Multicast route %p to %s was already removed", route,
-			log_strdup(net_sprint_ipv6_addr(&route->group)));
+	NET_ASSERT(route->is_used,
+		   "Multicast route %p to %s was already removed", route,
+		   log_strdup(net_sprint_ipv6_addr(&route->group)));
 
 	route->is_used = false;
 
@@ -790,19 +790,27 @@ int net_route_packet(struct net_pkt *pkt, struct in6_addr *nexthop)
 	 */
 	if (net_if_l2(net_pkt_iface(pkt)) != &NET_L2_GET_NAME(DUMMY)) {
 #endif
-		if (!net_pkt_lladdr_src(pkt)->addr) {
-			NET_DBG("Link layer source address not set");
-			return -EINVAL;
-		}
+#if defined(CONFIG_NET_L2_PPP)
+		/* PPP does not populate the lladdr fields */
+		if (net_if_l2(net_pkt_iface(pkt)) != &NET_L2_GET_NAME(PPP)) {
+#endif
+			if (!net_pkt_lladdr_src(pkt)->addr) {
+				NET_DBG("Link layer source address not set");
+				return -EINVAL;
+			}
 
-		/* Sanitycheck: If src and dst ll addresses are going to be
-		 * same, then something went wrong in route lookup.
-		 */
-		if (!memcmp(net_pkt_lladdr_src(pkt)->addr, lladdr->addr,
-			    lladdr->len)) {
-			NET_ERR("Src ll and Dst ll are same");
-			return -EINVAL;
+			/* Sanitycheck: If src and dst ll addresses are going
+			 * to be same, then something went wrong in route
+			 * lookup.
+			 */
+			if (!memcmp(net_pkt_lladdr_src(pkt)->addr, lladdr->addr,
+				    lladdr->len)) {
+				NET_ERR("Src ll and Dst ll are same");
+				return -EINVAL;
+			}
+#if defined(CONFIG_NET_L2_PPP)
 		}
+#endif
 #if defined(CONFIG_NET_L2_DUMMY)
 	}
 #endif
@@ -821,6 +829,24 @@ int net_route_packet(struct net_pkt *pkt, struct in6_addr *nexthop)
 	net_pkt_lladdr_dst(pkt)->len = lladdr->len;
 
 	net_pkt_set_iface(pkt, nbr->iface);
+
+	return net_send_data(pkt);
+}
+
+int net_route_packet_if(struct net_pkt *pkt, struct net_if *iface)
+{
+	/* The destination is reachable via iface. But since no valid nexthop
+	 * is known, net_pkt_lladdr_dst(pkt) cannot be set here.
+	 */
+
+	net_pkt_set_orig_iface(pkt, net_pkt_iface(pkt));
+	net_pkt_set_iface(pkt, iface);
+
+	net_pkt_set_forwarding(pkt, true);
+
+	net_pkt_lladdr_src(pkt)->addr = net_pkt_lladdr_if(pkt)->addr;
+	net_pkt_lladdr_src(pkt)->type = net_pkt_lladdr_if(pkt)->type;
+	net_pkt_lladdr_src(pkt)->len = net_pkt_lladdr_if(pkt)->len;
 
 	return net_send_data(pkt);
 }

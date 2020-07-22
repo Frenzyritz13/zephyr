@@ -45,6 +45,16 @@ static struct k_thread tthread[THREADS_NUM];
 static K_THREAD_STACK_ARRAY_DEFINE(tstack, THREADS_NUM, STACK_SIZE);
 
 static volatile int thread_started[THREADS_NUM - 1];
+
+static int curr_cpu(void)
+{
+	unsigned int k = arch_irq_lock();
+	int ret = arch_curr_cpu()->id;
+
+	arch_irq_unlock(k);
+	return ret;
+}
+
 /**
  * @brief Tests for SMP
  * @defgroup kernel_smp_tests SMP Tests
@@ -120,7 +130,7 @@ static void child_fn(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p3);
 	int parent_cpu_id = POINTER_TO_INT(p1);
 
-	zassert_true(parent_cpu_id != z_arch_curr_cpu()->id,
+	zassert_true(parent_cpu_id != curr_cpu(),
 		     "Parent isn't on other core");
 
 	sync_count++;
@@ -140,7 +150,7 @@ void test_cpu_id_threads(void)
 	/* Make sure idle thread runs on each core */
 	k_sleep(K_MSEC(1000));
 
-	int parent_cpu_id = z_arch_curr_cpu()->id;
+	int parent_cpu_id = curr_cpu();
 
 	k_tid_t tid = k_thread_create(&t2, t2_stack, T2_STACK_SIZE, child_fn,
 				      INT_TO_POINTER(parent_cpu_id), NULL,
@@ -161,7 +171,7 @@ static void thread_entry(void *p1, void *p2, void *p3)
 	int count = 0;
 
 	tinfo[thread_num].executed  = 1;
-	tinfo[thread_num].cpu_id = z_arch_curr_cpu()->id;
+	tinfo[thread_num].cpu_id = curr_cpu();
 
 	while (count++ < 5) {
 		k_busy_wait(DELAY_US);
@@ -171,7 +181,7 @@ static void thread_entry(void *p1, void *p2, void *p3)
 static void spin_for_threads_exit(void)
 {
 	for (int i = 0; i < THREADS_NUM - 1; i++) {
-		volatile u8_t *p = &tinfo[i].tid->base.thread_state;
+		volatile uint8_t *p = &tinfo[i].tid->base.thread_state;
 
 		while (!(*p & _THREAD_DEAD)) {
 		}
@@ -179,8 +189,8 @@ static void spin_for_threads_exit(void)
 	k_busy_wait(DELAY_US);
 }
 
-static void spawn_threads(int prio, int thread_num,
-			  int equal_prio, k_thread_entry_t thread_entry, int delay)
+static void spawn_threads(int prio, int thread_num, int equal_prio,
+			k_thread_entry_t thread_entry, int delay)
 {
 	int i;
 
@@ -198,7 +208,8 @@ static void spawn_threads(int prio, int thread_num,
 		tinfo[i].tid = k_thread_create(&tthread[i], tstack[i],
 					       STACK_SIZE, thread_entry,
 					       INT_TO_POINTER(i), NULL, NULL,
-					       tinfo[i].priority, 0, delay);
+					       tinfo[i].priority, 0,
+					       K_MSEC(delay));
 		if (delay) {
 			/* Increase delay for each thread */
 			delay = delay + 10;
@@ -338,7 +349,7 @@ void test_sleep_threads(void)
 	spawn_threads(K_PRIO_COOP(10), THREADS_NUM, !EQUAL_PRIORITY,
 		      &thread_entry, !THREAD_DELAY);
 
-	k_sleep(TIMEOUT);
+	k_msleep(TIMEOUT);
 
 	for (int i = 0; i < THREADS_NUM; i++) {
 		zassert_true(tinfo[i].executed == 1,
@@ -357,7 +368,7 @@ static void thread_wakeup_entry(void *p1, void *p2, void *p3)
 
 	thread_started[thread_num] = 1;
 
-	k_sleep(DELAY_US * 1000);
+	k_msleep(DELAY_US * 1000);
 
 	tinfo[thread_num].executed  = 1;
 }
@@ -430,13 +441,120 @@ void test_wakeup_threads(void)
 	cleanup_resources();
 }
 
+/* a thread for testing get current cpu */
+static void thread_get_cpu_entry(void *p1, void *p2, void *p3)
+{
+	int bsp_id = *(int *)p1;
+	int cpu_id = -1;
+
+	/* get current cpu number for running thread */
+	_cpu_t *curr_cpu = arch_curr_cpu();
+
+	/**TESTPOINT: call arch_curr_cpu() to get cpu struct */
+	zassert_true(curr_cpu != NULL,
+			"test failed to get current cpu.");
+
+	cpu_id = curr_cpu->id;
+
+	zassert_true(bsp_id != cpu_id,
+			"should not be the same with our BSP");
+
+	/* loop forever to ensure running on this CPU */
+	while (1) {
+		k_busy_wait(DELAY_US);
+	};
+}
+
+/**
+ * @brief Test get a pointer of CPU
+ *
+ * @ingroup kernel_smp_tests
+ *
+ * @details Architecture layer provides a mechanism to return a pointer to the
+ * current kernel CPU record of the running CPU.
+ *
+ * We call arch_curr_cpu() and get it's member, both in main and spwaned thread
+ * speratively, and compare them. They shall be different in SMP enviornment.
+ *
+ * @see arch_curr_cpu()
+ */
+void test_get_cpu(void)
+{
+	k_tid_t thread_id;
+
+	/* get current cpu number */
+	int cpu_id = arch_curr_cpu()->id;
+
+	thread_id = k_thread_create(&t2, t2_stack, T2_STACK_SIZE,
+				      (k_thread_entry_t)thread_get_cpu_entry,
+				      &cpu_id, NULL, NULL,
+				      K_PRIO_COOP(2),
+				      K_INHERIT_PERMS, K_NO_WAIT);
+
+	k_busy_wait(DELAY_US);
+
+	k_thread_abort(thread_id);
+}
+
+#ifdef CONFIG_TRACE_SCHED_IPI
+/* global variable for testing send IPI */
+static volatile int sched_ipi_has_called;
+
+void z_trace_sched_ipi(void)
+{
+	sched_ipi_has_called++;
+}
+
+/**
+ * @brief Test interprocessor interrupt
+ *
+ * @ingroup kernel_smp_tests
+ *
+ * @details Architecture layer provides a mechanism to issue an interprocessor
+ * interrupt to all other CPUs in the system that calls the scheduler IPI
+ * handler.
+ *
+ * We simply add a hook in z_sched_ipi(), in order to check if it has been
+ * called once in another CPU except the caller, when arch_sched_ipi() is
+ * called.
+ *
+ * @see arch_sched_ipi()
+ */
+void test_smp_ipi(void)
+{
+	TC_PRINT("cpu num=%d", CONFIG_MP_NUM_CPUS);
+
+	for (int i = 0; i < 3 ; i++) {
+		/* issue a sched ipi to tell other CPU to run thread */
+		sched_ipi_has_called = 0;
+		arch_sched_ipi();
+
+		/* Need to wait longer than we think, loaded CI
+		 * systems need to wait for host scheduling to run the
+		 * other CPU's thread.
+		 */
+		k_msleep(100);
+
+		/**TESTPOINT: check if enter our IPI interrupt handler */
+		zassert_true(sched_ipi_has_called != 0,
+				"did not receive IPI.(%d)",
+				sched_ipi_has_called);
+	}
+}
+#else
+void test_smp_ipi(void)
+{
+	ztest_test_skip();
+}
+#endif
+
 void test_main(void)
 {
 	/* Sleep a bit to guarantee that both CPUs enter an idle
 	 * thread from which they can exit correctly to run the main
 	 * test.
 	 */
-	k_sleep(K_MSEC(1000));
+	k_sleep(K_MSEC(10));
 
 	ztest_test_suite(smp,
 			 ztest_unit_test(test_smp_coop_threads),
@@ -445,7 +563,9 @@ void test_main(void)
 			 ztest_unit_test(test_preempt_resched_threads),
 			 ztest_unit_test(test_yield_threads),
 			 ztest_unit_test(test_sleep_threads),
-			 ztest_unit_test(test_wakeup_threads)
+			 ztest_unit_test(test_wakeup_threads),
+			 ztest_unit_test(test_smp_ipi),
+			 ztest_unit_test(test_get_cpu)
 			 );
 	ztest_run_test_suite(smp);
 }

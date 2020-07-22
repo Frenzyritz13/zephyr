@@ -42,7 +42,27 @@ enum adc_gain {
 	ADC_GAIN_16,  /**< x 16. */
 	ADC_GAIN_32,  /**< x 32. */
 	ADC_GAIN_64,  /**< x 64. */
+	ADC_GAIN_128, /**< x 128. */
 };
+
+/**
+ * @brief Invert the application of gain to a measurement value.
+ *
+ * For example, if the gain passed in is ADC_GAIN_1_6 and the
+ * referenced value is 10, the value after the function returns is 60.
+ *
+ * @param gain the gain used to amplify the input signal.
+ *
+ * @param value a pointer to a value that initially has the effect of
+ * the applied gain but has that effect removed when this function
+ * successfully returns.  If the gain cannot be reversed the value
+ * remains unchanged.
+ *
+ * @retval 0 if the gain was successfully reversed
+ * @retval -EINVAL if the gain could not be interpreted
+ */
+int adc_gain_invert(enum adc_gain gain,
+		    int32_t *value);
 
 /** @brief ADC references. */
 enum adc_reference {
@@ -88,7 +108,7 @@ struct adc_channel_cfg {
 	 * Particular drivers do not necessarily support all the possible units.
 	 * Value range is 0-16383 for a given unit.
 	 */
-	u16_t acquisition_time;
+	uint16_t acquisition_time;
 
 	/**
 	 * Channel identifier.
@@ -112,10 +132,10 @@ struct adc_channel_cfg {
 	 * on the underlying hardware capabilities or configured via a dedicated
 	 * Kconfig option).
 	 */
-	u8_t channel_id   : 5;
+	uint8_t channel_id   : 5;
 
 	/** Channel type: single-ended or differential. */
-	u8_t differential : 1;
+	uint8_t differential : 1;
 
 #ifdef CONFIG_ADC_CONFIGURABLE_INPUTS
 	/**
@@ -123,17 +143,54 @@ struct adc_channel_cfg {
 	 * This is a driver dependent value that identifies an ADC input to be
 	 * associated with the channel.
 	 */
-	u8_t input_positive;
+	uint8_t input_positive;
 
 	/**
 	 * Negative ADC input (used only for differential channels).
 	 * This is a driver dependent value that identifies an ADC input to be
 	 * associated with the channel.
 	 */
-	u8_t input_negative;
+	uint8_t input_negative;
 #endif /* CONFIG_ADC_CONFIGURABLE_INPUTS */
 };
 
+/**
+ * @brief Convert a raw ADC value to millivolts.
+ *
+ * This function performs the necessary conversion to transform a raw
+ * ADC measurement to a voltage in millivolts.
+ *
+ * @param ref_mv the reference voltage used for the measurement, in
+ * millivolts.  This may be from adc_ref_internal() or a known
+ * external reference.
+ *
+ * @param gain the ADC gain configuration used to sample the input
+ *
+ * @param resolution the number of bits in the absolute value of the
+ * sample.  For differential sampling this may be one less than the
+ * resolution in struct adc_sequence.
+ *
+ * @param valp pointer to the raw measurement value on input, and the
+ * corresponding millivolt value on successful conversion.  If
+ * conversion fails the stored value is left unchanged.
+ *
+ * @retval 0 on successful conversion
+ * @retval -EINVAL if the gain is not reversible
+ */
+static inline int adc_raw_to_millivolts(int32_t ref_mv,
+					enum adc_gain gain,
+					uint8_t resolution,
+					int32_t *valp)
+{
+	int32_t adc_mv = *valp * ref_mv;
+	int ret = adc_gain_invert(gain, &adc_mv);
+
+	if (ret == 0) {
+		*valp = (adc_mv >> resolution);
+	}
+
+	return ret;
+}
 
 /* Forward declaration of the adc_sequence structure. */
 struct adc_sequence;
@@ -170,7 +227,7 @@ enum adc_action {
 typedef enum adc_action (*adc_sequence_callback)(
 				struct device *dev,
 				const struct adc_sequence *sequence,
-				u16_t sampling_index);
+				uint16_t sampling_index);
 
 /**
  * @brief Structure defining additional options for an ADC sampling sequence.
@@ -185,7 +242,7 @@ struct adc_sequence_options {
 	 * kernel's system clock. Particular drivers may use some dedicated
 	 * hardware timers and achieve a better precision.
 	 */
-	u32_t interval_us;
+	uint32_t interval_us;
 
 	/**
 	 * Callback function to be called after each sampling is done.
@@ -197,7 +254,7 @@ struct adc_sequence_options {
 	 * Number of extra samplings to perform (the total number of samplings
 	 * is 1 + extra_samplings).
 	 */
-	u16_t extra_samplings;
+	uint16_t extra_samplings;
 };
 
 /**
@@ -216,7 +273,7 @@ struct adc_sequence {
 	 * All selected channels must be configured with adc_channel_setup()
 	 * before they are used in a sequence.
 	 */
-	u32_t channels;
+	uint32_t channels;
 
 	/**
 	 * Pointer to a buffer where the samples are to be written. Samples
@@ -244,7 +301,7 @@ struct adc_sequence {
 	 * for differential ones:
 	 *   - 2^(resolution-1) .. 2^(resolution-1) - 1.
 	 */
-	u8_t resolution;
+	uint8_t resolution;
 
 	/**
 	 * Oversampling setting.
@@ -252,7 +309,7 @@ struct adc_sequence {
 	 * This feature may be unsupported by a given ADC hardware, or in
 	 * a specific mode (e.g. when sampling multiple channels).
 	 */
-	u8_t oversampling;
+	uint8_t oversampling;
 
 	/**
 	 * Perform calibration before the reading is taken if requested.
@@ -296,13 +353,13 @@ typedef int (*adc_api_read_async)(struct device *dev,
  *
  * This is the mandatory API any ADC driver needs to expose.
  */
-struct adc_driver_api {
+__subsystem struct adc_driver_api {
 	adc_api_channel_setup channel_setup;
 	adc_api_read          read;
 #ifdef CONFIG_ADC_ASYNC
 	adc_api_read_async    read_async;
 #endif
-	u16_t ref_internal;	/* mV */
+	uint16_t ref_internal;	/* mV */
 };
 
 /**
@@ -404,7 +461,7 @@ static inline int z_impl_adc_read_async(struct device *dev,
  * @return a positive value is the reference voltage value.  Returns
  * zero if reference voltage information is not available.
  */
-static inline u16_t adc_ref_internal(struct device *dev)
+static inline uint16_t adc_ref_internal(struct device *dev)
 {
 	const struct adc_driver_api *api =
 				(const struct adc_driver_api *)dev->driver_api;

@@ -18,6 +18,9 @@
 #define	IRQ_TYPE_LEVEL		0x0
 #define	IRQ_TYPE_EDGE		0x1
 
-#define IRQ_DEFAULT_PRIORITY	0xa
+#define	GIC_SPI			0x0
+#define	GIC_PPI			0x1
+
+#define IRQ_DEFAULT_PRIORITY	0xa0
 
 #endif

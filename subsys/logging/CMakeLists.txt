@@ -48,6 +48,23 @@ if(NOT CONFIG_LOG_MINIMAL)
     CONFIG_LOG_MIPI_SYST_ENABLE
     log_output_syst.c
   )
+
+  zephyr_sources_ifdef(
+    CONFIG_LOG_BACKEND_RB
+    log_backend_rb.c
+  )
+
+  if(CONFIG_LOG_BACKEND_SPINEL)
+    zephyr_library_include_directories(
+	    ${ZEPHYR_BASE}/subsys/net/lib/openthread/platform/
+    )
+  endif()
+
+  zephyr_sources_ifdef(
+    CONFIG_LOG_BACKEND_SPINEL
+    log_backend_spinel.c
+  )
+
 else()
   zephyr_sources(log_minimal.c)
 endif()

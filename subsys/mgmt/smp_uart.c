@@ -12,7 +12,7 @@
 #include <zephyr.h>
 #include <init.h>
 #include "net/buf.h"
-#include "console/uart_mcumgr.h"
+#include <drivers/console/uart_mcumgr.h>
 #include "mgmt/mgmt.h"
 #include <mgmt/serial.h>
 #include "mgmt/buf.h"
@@ -71,7 +71,7 @@ static void smp_uart_rx_frag(struct uart_mcumgr_rx_buf *rx_buf)
 	k_work_submit(&smp_uart_work);
 }
 
-static u16_t smp_uart_get_mtu(const struct net_buf *nb)
+static uint16_t smp_uart_get_mtu(const struct net_buf *nb)
 {
 	return CONFIG_MCUMGR_SMP_UART_MTU;
 }

@@ -36,12 +36,23 @@ struct flash_pages_layout {
 };
 #endif /* CONFIG_FLASH_PAGE_LAYOUT */
 
+/**
+ * Flash memory parameters. Contents of this structure suppose to be
+ * filled in during flash device initialization and stay constant
+ * through a runtime.
+ */
+struct flash_parameters {
+	const size_t write_block_size;
+	uint8_t erase_value; /* Byte value of erased flash */
+};
+
 typedef int (*flash_api_read)(struct device *dev, off_t offset, void *data,
 			      size_t len);
 typedef int (*flash_api_write)(struct device *dev, off_t offset,
 			       const void *data, size_t len);
 typedef int (*flash_api_erase)(struct device *dev, off_t offset, size_t size);
 typedef int (*flash_api_write_protection)(struct device *dev, bool enable);
+typedef const struct flash_parameters* (*flash_api_get_parameters)(const struct device *dev);
 
 #if defined(CONFIG_FLASH_PAGE_LAYOUT)
 /**
@@ -70,15 +81,15 @@ typedef void (*flash_api_pages_layout)(struct device *dev,
 				       size_t *layout_size);
 #endif /* CONFIG_FLASH_PAGE_LAYOUT */
 
-struct flash_driver_api {
+__subsystem struct flash_driver_api {
 	flash_api_read read;
 	flash_api_write write;
 	flash_api_erase erase;
 	flash_api_write_protection write_protection;
+	flash_api_get_parameters get_parameters;
 #if defined(CONFIG_FLASH_PAGE_LAYOUT)
 	flash_api_pages_layout page_layout;
 #endif /* CONFIG_FLASH_PAGE_LAYOUT */
-	const size_t write_block_size;
 };
 
 /**
@@ -101,7 +112,8 @@ __syscall int flash_read(struct device *dev, off_t offset, void *data,
 static inline int z_impl_flash_read(struct device *dev, off_t offset, void *data,
 			     size_t len)
 {
-	const struct flash_driver_api *api = dev->driver_api;
+	const struct flash_driver_api *api =
+		(const struct flash_driver_api *)dev->driver_api;
 
 	return api->read(dev, offset, data, len);
 }
@@ -125,7 +137,8 @@ __syscall int flash_write(struct device *dev, off_t offset, const void *data,
 static inline int z_impl_flash_write(struct device *dev, off_t offset,
 				    const void *data, size_t len)
 {
-	const struct flash_driver_api *api = dev->driver_api;
+	const struct flash_driver_api *api =
+		(const struct flash_driver_api *)dev->driver_api;
 
 	return api->write(dev, offset, data, len);
 }
@@ -156,7 +169,8 @@ __syscall int flash_erase(struct device *dev, off_t offset, size_t size);
 static inline int z_impl_flash_erase(struct device *dev, off_t offset,
 				    size_t size)
 {
-	const struct flash_driver_api *api = dev->driver_api;
+	const struct flash_driver_api *api =
+		(const struct flash_driver_api *)dev->driver_api;
 
 	return api->erase(dev, offset, size);
 }
@@ -165,12 +179,29 @@ static inline int z_impl_flash_erase(struct device *dev, off_t offset,
  *  @brief  Enable or disable write protection for a flash memory
  *
  *  This API is required to be called before the invocation of write or erase
- *  API. Please note that on some flash components, the write protection is
+ *  API. Any calls to flash_write() or flash_erase() that do not first disable
+ *  write protection using this function result in undefined behavior.
+ *  Usage Example:
+ *  @code
+ *   flash_write_protection_set(flash_dev, false);
+ *   flash_erase(flash_dev, page_offset, page_size);
+ *
+ *   flash_write_protection_set(flash_dev, false);
+ *   flash_write(flash_dev, offset, data, sizeof(data));
+ *
+ *   flash_write_protection_set(flash_dev, true); // enable is recommended
+ *  @endcode
+ *
+ *  Please note that on some flash components, the write protection is
  *  automatically turned on again by the device after the completion of each
- *  write or erase calls. Therefore, on those flash parts, write protection needs
- *  to be disabled before each invocation of the write or erase API. Please refer
- *  to the sub-driver API or the data sheet of the flash component to get details
- *  on the write protection behavior.
+ *  call to flash_write or flash_erase(). Therefore, portable programs must
+ *  disable write protection using this function before each call to
+ *  flash_erase() or flash_write().
+ *
+ *  For some flash devices, this function may implement a no-operation, as some
+ *  flash hardware does not support write protection, or may not support it in
+ *  a manner that is compatible with this API. For these drivers, this function
+ *  always returns success.
  *
  *  @param  dev             : flash device
  *  @param  enable          : enable or disable flash write protection
@@ -182,7 +213,8 @@ __syscall int flash_write_protection_set(struct device *dev, bool enable);
 static inline int z_impl_flash_write_protection_set(struct device *dev,
 						   bool enable)
 {
-	const struct flash_driver_api *api = dev->driver_api;
+	const struct flash_driver_api *api =
+		(const struct flash_driver_api *)dev->driver_api;
 
 	return api->write_protection(dev, enable);
 }
@@ -190,7 +222,7 @@ static inline int z_impl_flash_write_protection_set(struct device *dev,
 struct flash_pages_info {
 	off_t start_offset; /* offset from the base of flash address */
 	size_t size;
-	u32_t index;
+	uint32_t index;
 };
 
 #if defined(CONFIG_FLASH_PAGE_LAYOUT)
@@ -215,7 +247,7 @@ __syscall int flash_get_page_info_by_offs(struct device *dev, off_t offset,
  *
  *  @return  0 on success, -EINVAL  if page of the index doesn't exist.
  */
-__syscall int flash_get_page_info_by_idx(struct device *dev, u32_t page_index,
+__syscall int flash_get_page_info_by_idx(struct device *dev, uint32_t page_index,
 					 struct flash_pages_info *info);
 
 /**
@@ -269,9 +301,32 @@ __syscall size_t flash_get_write_block_size(struct device *dev);
 
 static inline size_t z_impl_flash_get_write_block_size(struct device *dev)
 {
-	const struct flash_driver_api *api = dev->driver_api;
+	const struct flash_driver_api *api =
+		(const struct flash_driver_api *)dev->driver_api;
 
-	return api->write_block_size;
+	return api->get_parameters(dev)->write_block_size;
+}
+
+
+/**
+ *  @brief  Get pointer to flash_parameters structure
+ *
+ *  Returned pointer points to a structure that should be considered
+ *  constant through a runtime, regardless if it is defined in RAM or
+ *  Flash.
+ *  Developer is free to cache the structure pointer or copy its contents.
+ *
+ *  @return pointer to flash_parameters structure characteristic for
+ *          the device.
+ */
+__syscall const struct flash_parameters *flash_get_parameters(const struct device *dev);
+
+static inline const struct flash_parameters *z_impl_flash_get_parameters(const struct device *dev)
+{
+	const struct flash_driver_api *api =
+		(const struct flash_driver_api *)dev->driver_api;
+
+	return api->get_parameters(dev);
 }
 
 #ifdef __cplusplus

@@ -11,18 +11,19 @@ LOG_MODULE_REGISTER(usb_os_desc);
 #include <zephyr.h>
 
 #include <usb/usb_device.h>
+#include <usb/usb_common.h>
 #include <os_desc.h>
 
 static struct usb_os_descriptor *os_desc;
 
 int usb_handle_os_desc(struct usb_setup_packet *setup,
-		       s32_t *len, u8_t **data)
+		       int32_t *len, uint8_t **data)
 {
 	if (!os_desc) {
 		return -ENOTSUP;
 	}
 
-	if (GET_DESC_TYPE(setup->wValue) == DESC_STRING &&
+	if (GET_DESC_TYPE(setup->wValue) == USB_STRING_DESC &&
 	    GET_DESC_INDEX(setup->wValue) == USB_OSDESC_STRING_DESC_INDEX) {
 		LOG_DBG("MS OS Descriptor string read");
 		*data = os_desc->string;
@@ -35,7 +36,7 @@ int usb_handle_os_desc(struct usb_setup_packet *setup,
 }
 
 int usb_handle_os_desc_feature(struct usb_setup_packet *setup,
-			       s32_t *len, u8_t **data)
+			       int32_t *len, uint8_t **data)
 {
 	LOG_DBG("bRequest 0x%x", setup->bRequest);
 

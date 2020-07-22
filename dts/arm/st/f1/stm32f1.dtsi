@@ -5,13 +5,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <st/f1/stm32f1-pinctrl.dtsi>
 #include <arm/armv7-m.dtsi>
 #include <dt-bindings/clock/stm32_clock.h>
 #include <dt-bindings/i2c/i2c.h>
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pwm/pwm.h>
 
 / {
+	chosen {
+		zephyr,flash-controller = &flash;
+	};
+
 	cpus {
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -23,16 +27,30 @@
 		};
 	};
 
-	flash0: flash@8000000 {
-		compatible = "soc-nv-flash";
-		label = "FLASH_STM32";
-	};
 
 	sram0: memory@20000000 {
 		compatible = "mmio-sram";
 	};
 
 	soc {
+
+		flash: flash-controller@40022000 {
+			compatible = "st,stm32-flash-controller", "st,stm32f1-flash-controller";
+			label = "FLASH_CTRL";
+			reg = <0x40022000 0x400>;
+			interrupts = <3 0>;
+
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			flash0: flash@8000000 {
+				compatible = "soc-nv-flash";
+				label = "FLASH_STM32";
+
+				write-block-size = <2>;
+			};
+		};
+
 		rcc: rcc@40021000 {
 			compatible = "st,stm32-rcc";
 			#clock-cells = <2>;
@@ -176,6 +194,8 @@
 			compatible = "st,stm32-timers";
 			reg = <0x40012c00 0x400>;
 			clocks = <&rcc STM32_CLOCK_BUS_APB2 0x00000800>;
+			interrupts = <24 0>, <25 0>, <26 0>, <27 0>;
+			interrupt-names = "brk", "up", "trgcom", "cc";
 			status = "disabled";
 			label = "TIMERS_1";
 
@@ -184,7 +204,7 @@
 				status = "disabled";
 				st,prescaler = <10000>;
 				label = "PWM_1";
-				#pwm-cells = <2>;
+				#pwm-cells = <3>;
 			};
 		};
 
@@ -192,6 +212,8 @@
 			compatible = "st,stm32-timers";
 			reg = <0x40000000 0x400>;
 			clocks = <&rcc STM32_CLOCK_BUS_APB1 0x00000001>;
+			interrupts = <28 0>;
+			interrupt-names = "global";
 			status = "disabled";
 			label = "TIMERS_2";
 
@@ -200,7 +222,7 @@
 				status = "disabled";
 				st,prescaler = <0>;
 				label = "PWM_2";
-				#pwm-cells = <2>;
+				#pwm-cells = <3>;
 			};
 		};
 
@@ -208,6 +230,8 @@
 			compatible = "st,stm32-timers";
 			reg = <0x40000400 0x400>;
 			clocks = <&rcc STM32_CLOCK_BUS_APB1 0x00000002>;
+			interrupts = <29 0>;
+			interrupt-names = "global";
 			status = "disabled";
 			label = "TIMERS_3";
 
@@ -216,7 +240,7 @@
 				status = "disabled";
 				st,prescaler = <10000>;
 				label = "PWM_3";
-				#pwm-cells = <2>;
+				#pwm-cells = <3>;
 			};
 		};
 
@@ -224,6 +248,8 @@
 			compatible = "st,stm32-timers";
 			reg = <0x40000800 0x400>;
 			clocks = <&rcc STM32_CLOCK_BUS_APB1 0x00000004>;
+			interrupts = <30 0>;
+			interrupt-names = "global";
 			status = "disabled";
 			label = "TIMERS_4";
 
@@ -232,7 +258,7 @@
 				status = "disabled";
 				st,prescaler = <10000>;
 				label = "PWM_4";
-				#pwm-cells = <2>;
+				#pwm-cells = <3>;
 			};
 		};
 
@@ -244,6 +270,16 @@
 			status = "disabled";
 			label = "ADC_1";
 			#io-channel-cells = <1>;
+		};
+
+		dma1: dma@40020000 {
+			compatible = "st,stm32-dma";
+			#dma-cells = <4>;
+			reg = <0x40020000 0x400>;
+			clocks = <&rcc STM32_CLOCK_BUS_AHB1 0x1>;
+			interrupts = <11 0 12 0 13 0 14 0 15 0 16 0 17 0>;
+			status = "disabled";
+			label = "DMA_1";
 		};
 	};
 };

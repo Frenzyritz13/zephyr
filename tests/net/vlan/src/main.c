@@ -18,6 +18,7 @@ LOG_MODULE_REGISTER(net_test, NET_LOG_LEVEL);
 #include <errno.h>
 #include <sys/printk.h>
 #include <linker/sections.h>
+#include <random/rand32.h>
 
 #include <ztest.h>
 
@@ -39,7 +40,7 @@ LOG_MODULE_REGISTER(net_test, NET_LOG_LEVEL);
 #define DBG(fmt, ...)
 #endif
 
-#define PORT 9999
+#define TEST_PORT 9999
 
 #define VLAN_TAG_1 100
 #define VLAN_TAG_2 200
@@ -86,9 +87,9 @@ static K_SEM_DEFINE(wait_data, 0, UINT_MAX);
 
 struct eth_context {
 	struct net_if *iface;
-	u8_t mac_addr[6];
+	uint8_t mac_addr[6];
 
-	u16_t expecting_tag;
+	uint16_t expecting_tag;
 };
 
 static struct eth_context eth_vlan_context;
@@ -150,7 +151,7 @@ static struct ethernet_api api_funcs = {
 	.send = eth_tx,
 };
 
-static void generate_mac(u8_t *mac_addr)
+static void generate_mac(uint8_t *mac_addr)
 {
 	/* 00-00-5E-00-53-xx Documentation RFC 7042 */
 	mac_addr[0] = 0x00;
@@ -170,7 +171,8 @@ static int eth_vlan_init(struct device *dev)
 	return 0;
 }
 
-ETH_NET_DEVICE_INIT(eth_vlan_test, "eth_vlan_test", eth_vlan_init,
+ETH_NET_DEVICE_INIT(eth_vlan_test, "eth_vlan_test",
+		    eth_vlan_init, device_pm_control_nop,
 		    &eth_vlan_context, NULL, CONFIG_ETH_INIT_PRIORITY,
 		    &api_funcs, NET_ETH_MTU);
 
@@ -187,14 +189,14 @@ static int eth_init(struct device *dev)
  * is quite unlikely that this would be done in real life but for testing
  * purposes create it here.
  */
-NET_DEVICE_INIT(eth_test, "eth_test", eth_init, &eth_vlan_context,
-		NULL, CONFIG_ETH_INIT_PRIORITY, &api_funcs,
-		ETHERNET_L2, NET_L2_GET_CTX_TYPE(ETHERNET_L2),
+NET_DEVICE_INIT(eth_test, "eth_test", eth_init, device_pm_control_nop,
+		&eth_vlan_context, NULL, CONFIG_ETH_INIT_PRIORITY,
+		&api_funcs, ETHERNET_L2, NET_L2_GET_CTX_TYPE(ETHERNET_L2),
 		NET_ETH_MTU);
 
 struct net_if_test {
-	u8_t idx; /* not used for anything, just a dummy value */
-	u8_t mac_addr[sizeof(struct net_eth_addr)];
+	uint8_t idx; /* not used for anything, just a dummy value */
+	uint8_t mac_addr[sizeof(struct net_eth_addr)];
 	struct net_linkaddr ll_addr;
 };
 
@@ -203,7 +205,7 @@ static int net_iface_dev_init(struct device *dev)
 	return 0;
 }
 
-static u8_t *net_iface_get_mac(struct device *dev)
+static uint8_t *net_iface_get_mac(struct device *dev)
 {
 	struct net_if_test *data = dev->driver_data;
 
@@ -225,7 +227,7 @@ static u8_t *net_iface_get_mac(struct device *dev)
 
 static void net_iface_init(struct net_if *iface)
 {
-	u8_t *mac = net_iface_get_mac(net_if_get_device(iface));
+	uint8_t *mac = net_iface_get_mac(net_if_get_device(iface));
 
 	net_if_set_link_addr(iface, mac, sizeof(struct net_eth_addr),
 			     NET_LINK_ETHERNET);
@@ -251,6 +253,7 @@ NET_DEVICE_INIT_INSTANCE(net_iface1_test,
 			 "iface1",
 			 iface1,
 			 net_iface_dev_init,
+			 device_pm_control_nop,
 			 &net_iface1_data,
 			 NULL,
 			 CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
@@ -263,6 +266,7 @@ NET_DEVICE_INIT_INSTANCE(net_iface2_test,
 			 "iface2",
 			 iface2,
 			 net_iface_dev_init,
+			 device_pm_control_nop,
 			 &net_iface2_data,
 			 NULL,
 			 CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
@@ -336,11 +340,11 @@ static void test_vlan_setup(void)
 
 	/* One extra eth interface without vlan support */
 	zassert_equal(ud.eth_if_count, NET_VLAN_MAX_COUNT,
-		      "Invalid numer of VLANs %d vs %d\n",
+		      "Invalid number of VLANs %d vs %d\n",
 		      ud.eth_if_count, NET_VLAN_MAX_COUNT);
 
 	zassert_equal(ud.total_if_count, NET_VLAN_MAX_COUNT + 1 + 2,
-		      "Invalid numer of interfaces");
+		      "Invalid number of interfaces");
 
 	/* Put the extra non-vlan ethernet interface to last */
 	eth_interfaces[4] = extra_eth;
@@ -417,9 +421,9 @@ static void test_address_setup(void)
 static void test_vlan_tci(void)
 {
 	struct net_pkt *pkt;
-	u16_t tci;
-	u16_t tag;
-	u8_t priority;
+	uint16_t tci;
+	uint16_t tag;
+	uint8_t priority;
 	bool dei;
 
 	pkt = net_pkt_alloc(K_FOREVER);
@@ -716,7 +720,7 @@ static void test_vlan_send_data(void)
 	int ret;
 	struct sockaddr_in6 dst_addr6 = {
 		.sin6_family = AF_INET6,
-		.sin6_port = htons(PORT),
+		.sin6_port = htons(TEST_PORT),
 	};
 	struct sockaddr_in6 src_addr6 = {
 		.sin6_family = AF_INET6,

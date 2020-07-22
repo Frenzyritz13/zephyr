@@ -15,9 +15,9 @@
 
 #include "legacy_api.h"
 
-static u32_t accumulated_cycle_count;
+static uint32_t accumulated_cycle_count;
 
-static s32_t _sys_idle_elapsed_ticks = 1;
+static int32_t _sys_idle_elapsed_ticks = 1;
 
 static void timer_irq_handler(void *unused)
 {
@@ -28,7 +28,7 @@ static void timer_irq_handler(void *unused)
 	read_timer_start_of_tick_handler();
 #endif
 
-	accumulated_cycle_count += sys_clock_hw_cycles_per_tick();
+	accumulated_cycle_count += k_ticks_to_cyc_floor32(1);
 
 	/* Clear the interrupt */
 	alt_handle_irq((void *)TIMER_0_BASE, TIMER_0_IRQ);
@@ -46,20 +46,20 @@ int z_clock_driver_init(struct device *device)
 	ARG_UNUSED(device);
 
 	IOWR_ALTERA_AVALON_TIMER_PERIODL(TIMER_0_BASE,
-			sys_clock_hw_cycles_per_tick() & 0xFFFF);
+			k_ticks_to_cyc_floor32(1) & 0xFFFF);
 	IOWR_ALTERA_AVALON_TIMER_PERIODH(TIMER_0_BASE,
-			(sys_clock_hw_cycles_per_tick() >> 16) & 0xFFFF);
+			(k_ticks_to_cyc_floor32(1) >> 16) & 0xFFFF);
 
 	IRQ_CONNECT(TIMER_0_IRQ, 0, timer_irq_handler, NULL, 0);
 	irq_enable(TIMER_0_IRQ);
 
 	alt_avalon_timer_sc_init((void *)TIMER_0_BASE, 0,
-			TIMER_0_IRQ, sys_clock_hw_cycles_per_tick());
+			TIMER_0_IRQ, k_ticks_to_cyc_floor32(1));
 
 	return 0;
 }
 
-u32_t z_timer_cycle_get_32(void)
+uint32_t z_timer_cycle_get_32(void)
 {
 	/* Per the Altera Embedded IP Peripherals guide, you cannot
 	 * use a timer instance for both the system clock and timestamps

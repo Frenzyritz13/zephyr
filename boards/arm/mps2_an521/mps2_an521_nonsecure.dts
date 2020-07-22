@@ -19,6 +19,7 @@
 		led1 = &led_1;
 		sw0 = &user_button_0;
 		sw1 = &user_button_1;
+		watchdog0 = &wdog0;
 	};
 
 	chosen {
@@ -76,8 +77,8 @@
 		reg = <0x28100000 0x100000>;
 	};
 
-	flash0: flash@100000 {
-		reg = <0x100000 0xDF00000>;
+	flash0: flash@100400 {
+		reg = <0x100400 0xDF00000>;
 	};
 
 	soc {

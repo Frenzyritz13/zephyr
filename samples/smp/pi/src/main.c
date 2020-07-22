@@ -17,7 +17,8 @@
 #define DIGITS_NUM	240
 
 #define LENGTH		((DIGITS_NUM / 4) * 14)
-#define STACK_SIZE	(LENGTH * sizeof(int) + 512)
+#define STACK_SIZE	((LENGTH * sizeof(int) + 512) + \
+			 CONFIG_TEST_EXTRA_STACKSIZE)
 
 #ifdef CONFIG_SMP
 #define CORES_NUM	CONFIG_MP_NUM_CPUS
@@ -78,7 +79,7 @@ void test_thread(void *arg1, void *arg2, void *arg3)
 
 void main(void)
 {
-	u32_t start_time, stop_time, cycles_spent, nanoseconds_spent;
+	uint32_t start_time, stop_time, cycles_spent, nanoseconds_spent;
 	int i;
 
 	printk("Calculate first %d digits of Pi independently by %d threads.\n",
@@ -96,13 +97,13 @@ void main(void)
 
 	/* Wait for all workers to finish their calculations */
 	while (counter)
-		k_sleep(1);
+		k_sleep(K_MSEC(1));
 
 	/* Capture final time stamp */
 	stop_time = k_cycle_get_32();
 
 	cycles_spent = stop_time - start_time;
-	nanoseconds_spent = SYS_CLOCK_HW_CYCLES_TO_NS(cycles_spent);
+	nanoseconds_spent = (uint32_t)k_cyc_to_ns_floor64(cycles_spent);
 
 	for (i = 0; i < THREADS_NUM; i++)
 		printk("Pi value calculated by thread #%d: %s\n", i, buffer[i]);

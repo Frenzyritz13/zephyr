@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#define DT_DRV_COMPAT zephyr_sim_flash
+
 #include <device.h>
 #include <drivers/flash.h>
 #include <init.h>
@@ -13,11 +15,35 @@
 #include <stats/stats.h>
 #include <string.h>
 
+#ifdef CONFIG_ARCH_POSIX
+
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <errno.h>
+
+#include "cmdline.h"
+#include "soc.h"
+
+#endif /* CONFIG_ARCH_POSIX */
+
 /* configuration derived from DT */
-#define FLASH_SIMULATOR_BASE_OFFSET DT_FLASH_SIM_BASE_ADDRESS
-#define FLASH_SIMULATOR_ERASE_UNIT DT_FLASH_SIM_ERASE_BLOCK_SIZE
-#define FLASH_SIMULATOR_PROG_UNIT DT_FLASH_SIM_WRITE_BLOCK_SIZE
-#define FLASH_SIMULATOR_FLASH_SIZE DT_FLASH_SIM_SIZE
+#ifdef CONFIG_ARCH_POSIX
+#define SOC_NV_FLASH_NODE DT_CHILD(DT_DRV_INST(0), flash_0)
+#else
+#define SOC_NV_FLASH_NODE DT_CHILD(DT_DRV_INST(0), flash_sim_0)
+#endif /* CONFIG_ARCH_POSIX */
+
+#define FLASH_SIMULATOR_BASE_OFFSET DT_REG_ADDR(SOC_NV_FLASH_NODE)
+#define FLASH_SIMULATOR_ERASE_UNIT DT_PROP(SOC_NV_FLASH_NODE, erase_block_size)
+#define FLASH_SIMULATOR_PROG_UNIT DT_PROP(SOC_NV_FLASH_NODE, write_block_size)
+#define FLASH_SIMULATOR_FLASH_SIZE DT_REG_SIZE(SOC_NV_FLASH_NODE)
+
+#define FLASH_SIMULATOR_DEV_NAME DT_INST_LABEL(0)
+#define FLASH_SIMULATOR_ERASE_VALUE \
+		DT_PROP(DT_PARENT(SOC_NV_FLASH_NODE), erase_value)
 
 #define FLASH_SIMULATOR_PAGE_COUNT (FLASH_SIMULATOR_FLASH_SIZE / \
 				    FLASH_SIMULATOR_ERASE_UNIT)
@@ -55,7 +81,7 @@
 #define FLASH_SIMULATOR_FLASH_PAGE_COUNT CONFIG_FLASH_SIMULATOR_STAT_PAGE_COUNT
 #endif
 
-/* simulator statistcs */
+/* simulator statistics */
 STATS_SECT_START(flash_sim_stats)
 STATS_SECT_ENTRY32(bytes_read)		/* total bytes read */
 STATS_SECT_ENTRY32(bytes_written)       /* total bytes written */
@@ -102,10 +128,23 @@ STATS_NAME(flash_sim_thresholds, max_erase_calls)
 STATS_NAME(flash_sim_thresholds, max_len)
 STATS_NAME_END(flash_sim_thresholds);
 
-static u8_t mock_flash[FLASH_SIMULATOR_FLASH_SIZE];
+#ifdef CONFIG_ARCH_POSIX
+static uint8_t *mock_flash;
+static int flash_fd = -1;
+static const char *flash_file_path;
+static const char default_flash_file_path[] = "flash.bin";
+#else
+static uint8_t mock_flash[FLASH_SIMULATOR_FLASH_SIZE];
+#endif /* CONFIG_ARCH_POSIX */
+
 static bool write_protection;
 
 static const struct flash_driver_api flash_sim_api;
+
+static const struct flash_parameters flash_sim_parameters = {
+	.write_block_size = FLASH_SIMULATOR_PROG_UNIT,
+	.erase_value = FLASH_SIMULATOR_ERASE_VALUE
+};
 
 static int flash_range_is_valid(struct device *dev, off_t offset, size_t len)
 {
@@ -165,6 +204,7 @@ static int flash_sim_read(struct device *dev, const off_t offset, void *data,
 static int flash_sim_write(struct device *dev, const off_t offset,
 			   const void *data, const size_t len)
 {
+	uint8_t buf[FLASH_SIMULATOR_PROG_UNIT];
 	ARG_UNUSED(dev);
 
 	if (!flash_range_is_valid(dev, offset, len)) {
@@ -183,11 +223,8 @@ static int flash_sim_write(struct device *dev, const off_t offset,
 	STATS_INC(flash_sim_stats, flash_write_calls);
 
 	/* check if any unit has been already programmed */
-	for (u32_t i = 0; i < len; i += FLASH_SIMULATOR_PROG_UNIT) {
-
-		u8_t buf[FLASH_SIMULATOR_PROG_UNIT];
-
-		memset(buf, 0xFF, sizeof(buf));
+	memset(buf, FLASH_SIMULATOR_ERASE_VALUE, sizeof(buf));
+	for (uint32_t i = 0; i < len; i += FLASH_SIMULATOR_PROG_UNIT) {
 		if (memcmp(buf, FLASH(offset + i), sizeof(buf))) {
 			STATS_INC(flash_sim_stats, double_writes);
 #if !CONFIG_FLASH_SIMULATOR_DOUBLE_WRITES
@@ -212,7 +249,7 @@ static int flash_sim_write(struct device *dev, const off_t offset,
 		}
 	}
 
-	for (u32_t i = 0; i < len; i++) {
+	for (uint32_t i = 0; i < len; i++) {
 		if (data_part_ignored) {
 			if (i >= flash_sim_thresholds.max_len) {
 				return 0;
@@ -220,7 +257,11 @@ static int flash_sim_write(struct device *dev, const off_t offset,
 		}
 
 		/* only pull bits to zero */
-		*(FLASH(offset + i)) &= *((u8_t *)data + i);
+#if FLASH_SIMULATOR_ERASE_VALUE == 0xFF
+		*(FLASH(offset + i)) &= *((uint8_t *)data + i);
+#else
+		*(FLASH(offset + i)) = *((uint8_t *)data + i);
+#endif
 	}
 
 	STATS_INCN(flash_sim_stats, bytes_written, len);
@@ -235,16 +276,13 @@ static int flash_sim_write(struct device *dev, const off_t offset,
 	return 0;
 }
 
-static void unit_erase(const u32_t unit)
+static void unit_erase(const uint32_t unit)
 {
 	const off_t unit_addr = FLASH_SIMULATOR_BASE_OFFSET +
 				(unit * FLASH_SIMULATOR_ERASE_UNIT);
 
-	/* byte pattern to fill the flash with */
-	u8_t byte_pattern = 0xFF;
-
-	/* erase the memory unit by pulling all bits to one */
-	memset(FLASH(unit_addr), byte_pattern,
+	/* erase the memory unit by setting it to erase value */
+	memset(FLASH(unit_addr), FLASH_SIMULATOR_ERASE_VALUE,
 	       FLASH_SIMULATOR_ERASE_UNIT);
 }
 
@@ -277,11 +315,11 @@ static int flash_sim_erase(struct device *dev, const off_t offset,
 	}
 
 	/* the first unit to be erased */
-	u32_t unit_start = (offset - FLASH_SIMULATOR_BASE_OFFSET) /
+	uint32_t unit_start = (offset - FLASH_SIMULATOR_BASE_OFFSET) /
 			   FLASH_SIMULATOR_ERASE_UNIT;
 
 	/* erase as many units as necessary and increase their erase counter */
-	for (u32_t i = 0; i < len / FLASH_SIMULATOR_ERASE_UNIT; i++) {
+	for (uint32_t i = 0; i < len / FLASH_SIMULATOR_ERASE_UNIT; i++) {
 		ERASE_CYCLES_INC(unit_start + i);
 		unit_erase(unit_start + i);
 	}
@@ -311,27 +349,132 @@ static void flash_sim_page_layout(struct device *dev,
 }
 #endif
 
+static const struct flash_parameters *
+flash_sim_get_parameters(const struct device *dev)
+{
+	ARG_UNUSED(dev);
+
+	return &flash_sim_parameters;
+}
+
 static const struct flash_driver_api flash_sim_api = {
 	.read = flash_sim_read,
 	.write = flash_sim_write,
 	.erase = flash_sim_erase,
 	.write_protection = flash_wp_set,
-	.write_block_size = FLASH_SIMULATOR_PROG_UNIT,
+	.get_parameters = flash_sim_get_parameters,
 #ifdef CONFIG_FLASH_PAGE_LAYOUT
 	.page_layout = flash_sim_page_layout,
 #endif
 };
+
+#ifdef CONFIG_ARCH_POSIX
+
+static int flash_mock_init(struct device *dev)
+{
+	struct stat f_stat;
+	int rc;
+
+	if (flash_file_path == NULL) {
+		flash_file_path = default_flash_file_path;
+	}
+
+	flash_fd = open(flash_file_path, O_RDWR | O_CREAT, (mode_t)0600);
+	if (flash_fd == -1) {
+		posix_print_warning("Failed to open flash device file "
+				    "%s: %s\n",
+				    flash_file_path, strerror(errno));
+		return -EIO;
+	}
+
+	rc = fstat(flash_fd, &f_stat);
+	if (rc) {
+		posix_print_warning("Failed to get status of flash device file "
+				    "%s: %s\n",
+				    flash_file_path, strerror(errno));
+		return -EIO;
+	}
+
+	if (ftruncate(flash_fd, FLASH_SIMULATOR_FLASH_SIZE) == -1) {
+		posix_print_warning("Failed to resize flash device file "
+				    "%s: %s\n",
+				    flash_file_path, strerror(errno));
+		return -EIO;
+	}
+
+	mock_flash = mmap(NULL, FLASH_SIMULATOR_FLASH_SIZE,
+			  PROT_WRITE | PROT_READ, MAP_SHARED, flash_fd, 0);
+	if (mock_flash == MAP_FAILED) {
+		posix_print_warning("Failed to mmap flash device file "
+				    "%s: %s\n",
+				    flash_file_path, strerror(errno));
+		return -EIO;
+	}
+
+	if (f_stat.st_size == 0) {
+		/* erase the memory unit by pulling all bits to one */
+		(void)memset(mock_flash, FLASH_SIMULATOR_ERASE_VALUE,
+			     FLASH_SIMULATOR_FLASH_SIZE);
+	}
+
+	return 0;
+}
+
+#else
+
+static int flash_mock_init(struct device *dev)
+{
+	memset(mock_flash, FLASH_SIMULATOR_ERASE_VALUE, ARRAY_SIZE(mock_flash));
+	return 0;
+}
+
+#endif /* CONFIG_ARCH_POSIX */
 
 static int flash_init(struct device *dev)
 {
 	STATS_INIT_AND_REG(flash_sim_stats, STATS_SIZE_32, "flash_sim_stats");
 	STATS_INIT_AND_REG(flash_sim_thresholds, STATS_SIZE_32,
 			   "flash_sim_thresholds");
-	memset(mock_flash, 0xFF, ARRAY_SIZE(mock_flash));
-
-	return 0;
+	return flash_mock_init(dev);
 }
 
-DEVICE_AND_API_INIT(flash_simulator, "FLASH_SIMULATOR", flash_init, NULL, NULL,
-		    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+DEVICE_AND_API_INIT(flash_simulator, FLASH_SIMULATOR_DEV_NAME, flash_init,
+		    NULL, NULL, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		    &flash_sim_api);
+
+#ifdef CONFIG_ARCH_POSIX
+
+static void flash_native_posix_cleanup(void)
+{
+	if ((mock_flash != MAP_FAILED) && (mock_flash != NULL)) {
+		munmap(mock_flash, FLASH_SIMULATOR_FLASH_SIZE);
+	}
+
+	if (flash_fd != -1) {
+		close(flash_fd);
+	}
+}
+
+static void flash_native_posix_options(void)
+{
+	static struct args_struct_t flash_options[] = {
+		{ .manual = false,
+		  .is_mandatory = false,
+		  .is_switch = false,
+		  .option = "flash",
+		  .name = "path",
+		  .type = 's',
+		  .dest = (void *)&flash_file_path,
+		  .call_when_found = NULL,
+		  .descript = "Path to binary file to be used as flash" },
+		ARG_TABLE_ENDMARKER
+	};
+
+	native_add_command_line_opts(flash_options);
+}
+
+
+NATIVE_TASK(flash_native_posix_options, PRE_BOOT_1, 1);
+NATIVE_TASK(flash_native_posix_cleanup, ON_EXIT, 1);
+
+#endif /* CONFIG_ARCH_POSIX */

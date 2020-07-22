@@ -21,14 +21,25 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 #include "lwm2m_object.h"
 #include "lwm2m_engine.h"
 
+#ifdef CONFIG_LWM2M_IPSO_ONOFF_SWITCH_TIMESTAMP
+#define ADD_TIMESTAMPS 1
+#else
+#define ADD_TIMESTAMPS 0
+#endif
+
 /* resource IDs */
 #define SWITCH_DIGITAL_STATE_ID		5500
 #define SWITCH_DIGITAL_INPUT_COUNTER_ID	5501
 #define SWITCH_ON_TIME_ID		5852
 #define SWITCH_OFF_TIME_ID		5854
 #define SWITCH_APPLICATION_TYPE_ID	5750
+#if ADD_TIMESTAMPS
+#define SWITCH_TIMESTAMP_ID		5518
 
+#define SWITCH_MAX_ID			6
+#else
 #define SWITCH_MAX_ID			5
+#endif
 
 #define MAX_INSTANCE_COUNT	CONFIG_LWM2M_IPSO_ONOFF_SWITCH_INSTANCE_COUNT
 
@@ -40,11 +51,11 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
 /* resource state */
 struct ipso_switch_data {
-	u64_t trigger_offset;
-	u64_t on_time_sec;
-	u64_t off_time_sec;
-	u64_t counter;
-	u16_t obj_inst_id;
+	uint64_t trigger_offset;
+	uint64_t on_time_sec;
+	uint64_t off_time_sec;
+	uint64_t counter;
+	uint16_t obj_inst_id;
 	bool last_state;
 	bool state;
 };
@@ -58,6 +69,9 @@ static struct lwm2m_engine_obj_field fields[] = {
 	OBJ_FIELD_DATA(SWITCH_ON_TIME_ID, RW_OPT, U64),
 	OBJ_FIELD_DATA(SWITCH_OFF_TIME_ID, RW_OPT, U64),
 	OBJ_FIELD_DATA(SWITCH_APPLICATION_TYPE_ID, RW_OPT, STRING),
+#if ADD_TIMESTAMPS
+	OBJ_FIELD_DATA(SWITCH_TIMESTAMP_ID, RW_OPT, TIME),
+#endif
 };
 
 static struct lwm2m_engine_obj_inst inst[MAX_INSTANCE_COUNT];
@@ -65,7 +79,7 @@ static struct lwm2m_engine_res res[MAX_INSTANCE_COUNT][SWITCH_MAX_ID];
 static struct lwm2m_engine_res_inst
 		res_inst[MAX_INSTANCE_COUNT][RESOURCE_INSTANCE_COUNT];
 
-static int get_switch_index(u16_t obj_inst_id)
+static int get_switch_index(uint16_t obj_inst_id)
 {
 	int i, ret = -ENOENT;
 
@@ -81,9 +95,9 @@ static int get_switch_index(u16_t obj_inst_id)
 	return ret;
 }
 
-static int state_post_write_cb(u16_t obj_inst_id,
-			       u16_t res_id, u16_t res_inst_id,
-			       u8_t *data, u16_t data_len,
+static int state_post_write_cb(uint16_t obj_inst_id,
+			       uint16_t res_id, uint16_t res_inst_id,
+			       uint8_t *data, uint16_t data_len,
 			       bool last_block, size_t total_size)
 {
 	int i;
@@ -110,8 +124,8 @@ static int state_post_write_cb(u16_t obj_inst_id,
 	return 0;
 }
 
-static void *on_time_read_cb(u16_t obj_inst_id,
-			     u16_t res_id, u16_t res_inst_id,
+static void *on_time_read_cb(uint16_t obj_inst_id,
+			     uint16_t res_id, uint16_t res_inst_id,
 			     size_t *data_len)
 {
 	int i = get_switch_index(obj_inst_id);
@@ -129,8 +143,8 @@ static void *on_time_read_cb(u16_t obj_inst_id,
 	return &switch_data[i].on_time_sec;
 }
 
-static void *off_time_read_cb(u16_t obj_inst_id,
-			      u16_t res_id, u16_t res_inst_id,
+static void *off_time_read_cb(uint16_t obj_inst_id,
+			      uint16_t res_id, uint16_t res_inst_id,
 			      size_t *data_len)
 {
 	int i = get_switch_index(obj_inst_id);
@@ -148,9 +162,9 @@ static void *off_time_read_cb(u16_t obj_inst_id,
 	return &switch_data[i].off_time_sec;
 }
 
-static int time_post_write_cb(u16_t obj_inst_id,
-			      u16_t res_id, u16_t res_inst_id,
-			      u8_t *data, u16_t data_len,
+static int time_post_write_cb(uint16_t obj_inst_id,
+			      uint16_t res_id, uint16_t res_inst_id,
+			      uint8_t *data, uint16_t data_len,
 			      bool last_block, size_t total_size)
 {
 	int i = get_switch_index(obj_inst_id);
@@ -163,7 +177,7 @@ static int time_post_write_cb(u16_t obj_inst_id,
 	return 0;
 }
 
-static struct lwm2m_engine_obj_inst *switch_create(u16_t obj_inst_id)
+static struct lwm2m_engine_obj_inst *switch_create(uint16_t obj_inst_id)
 {
 	int index, avail = -1, i = 0, j = 0;
 
@@ -213,6 +227,10 @@ static struct lwm2m_engine_obj_inst *switch_create(u16_t obj_inst_id)
 		     off_time_read_cb, NULL, time_post_write_cb, NULL);
 	INIT_OBJ_RES_OPTDATA(SWITCH_APPLICATION_TYPE_ID, res[avail], i,
 			     res_inst[avail], j);
+#if ADD_TIMESTAMPS
+	INIT_OBJ_RES_OPTDATA(SWITCH_TIMESTAMP_ID, res[avail], i,
+			     res_inst[avail], j);
+#endif
 
 	inst[avail].resources = res[avail];
 	inst[avail].resource_count = i;

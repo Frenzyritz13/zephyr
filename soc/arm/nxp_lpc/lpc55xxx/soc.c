@@ -19,11 +19,12 @@
 #include <drivers/uart.h>
 #include <linker/sections.h>
 #include <arch/cpu.h>
-#include <cortex_m/exc.h>
+#include <aarch32/cortex_m/exc.h>
 #include <fsl_power.h>
 #include <fsl_clock.h>
 #include <fsl_common.h>
 #include <fsl_device_registers.h>
+#include <fsl_pint.h>
 
 /**
  *
@@ -35,7 +36,7 @@
 
 static ALWAYS_INLINE void clock_init(void)
 {
-#ifdef CONFIG_SOC_LPC55S69_CPU0
+#if defined(CONFIG_SOC_LPC55S16) || defined(CONFIG_SOC_LPC55S69_CPU0)
     /*!< Set up the clock sources */
     /*!< Configure FRO192M */
 	/*!< Ensure FRO is on  */
@@ -59,6 +60,23 @@ static ALWAYS_INLINE void clock_init(void)
 
 	/* Enables the clock for the I/O controller.: Enable Clock. */
     CLOCK_EnableClock(kCLOCK_Iocon);
+
+#if DT_NODE_HAS_COMPAT_STATUS(DT_NODELABEL(flexcomm4), nxp_lpc_i2c, okay)
+	/* attach 12 MHz clock to FLEXCOMM4 */
+	CLOCK_AttachClk(kFRO12M_to_FLEXCOMM4);
+
+	/* reset FLEXCOMM for I2C */
+	RESET_PeripheralReset(kFC4_RST_SHIFT_RSTn);
+#endif
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(hs_lspi), okay)
+	/* Attach 12 MHz clock to HSLSPI */
+	CLOCK_AttachClk(kFRO_HF_DIV_to_HSLSPI);
+
+	/* reset HSLSPI for SPI */
+	RESET_PeripheralReset(kHSLSPI_RST_SHIFT_RSTn);
+#endif
+
 #endif /* CONFIG_SOC_LPC55S69_CPU0 */
 }
 
@@ -72,7 +90,7 @@ static ALWAYS_INLINE void clock_init(void)
  * @return 0
  */
 
-static int nxp_lpc55s69_init(struct device *arg)
+static int nxp_lpc55xxx_init(struct device *arg)
 {
 	ARG_UNUSED(arg);
 
@@ -84,8 +102,13 @@ static int nxp_lpc55s69_init(struct device *arg)
 
 	z_arm_clear_faults();
 
-	/* Initialize FRO/system clock to 48 MHz */
+	/* Initialize FRO/system clock to 96 MHz */
 	clock_init();
+
+#ifdef CONFIG_GPIO_MCUX_LPC
+	/* Turn on PINT device*/
+	PINT_Init(PINT);
+#endif
 
 	/*
 	 * install default handler that simply resets the CPU if configured in
@@ -99,4 +122,4 @@ static int nxp_lpc55s69_init(struct device *arg)
 	return 0;
 }
 
-SYS_INIT(nxp_lpc55s69_init, PRE_KERNEL_1, 0);
+SYS_INIT(nxp_lpc55xxx_init, PRE_KERNEL_1, 0);

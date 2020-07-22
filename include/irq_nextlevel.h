@@ -24,7 +24,7 @@ extern "C" {
 typedef void (*irq_next_level_func_t)(struct device *dev, unsigned int irq);
 typedef unsigned int (*irq_next_level_get_state_t)(struct device *dev);
 typedef void (*irq_next_level_priority_t)(struct device *dev,
-		unsigned int irq, unsigned int prio, u32_t flags);
+		unsigned int irq, unsigned int prio, uint32_t flags);
 typedef int (*irq_next_level_get_line_state_t)(struct device *dev,
 					       unsigned int irq);
 
@@ -49,9 +49,10 @@ struct irq_next_level_api {
  *
  * @return N/A
  */
-static inline void irq_enable_next_level(struct device *dev, u32_t irq)
+static inline void irq_enable_next_level(struct device *dev, uint32_t irq)
 {
-	const struct irq_next_level_api *api = dev->driver_api;
+	const struct irq_next_level_api *api =
+		(const struct irq_next_level_api *)dev->driver_api;
 
 	api->intr_enable(dev, irq);
 }
@@ -66,9 +67,10 @@ static inline void irq_enable_next_level(struct device *dev, u32_t irq)
  *
  * @return N/A
  */
-static inline void irq_disable_next_level(struct device *dev, u32_t irq)
+static inline void irq_disable_next_level(struct device *dev, uint32_t irq)
 {
-	const struct irq_next_level_api *api = dev->driver_api;
+	const struct irq_next_level_api *api =
+		(const struct irq_next_level_api *)dev->driver_api;
 
 	api->intr_disable(dev, irq);
 }
@@ -85,7 +87,8 @@ static inline void irq_disable_next_level(struct device *dev, u32_t irq)
  */
 static inline unsigned int irq_is_enabled_next_level(struct device *dev)
 {
-	const struct irq_next_level_api *api = dev->driver_api;
+	const struct irq_next_level_api *api =
+		(const struct irq_next_level_api *)dev->driver_api;
 
 	return api->intr_get_state(dev);
 }
@@ -103,10 +106,11 @@ static inline unsigned int irq_is_enabled_next_level(struct device *dev)
  *
  * @return N/A
  */
-static inline void irq_set_priority_next_level(struct device *dev, u32_t irq,
-		u32_t prio, u32_t flags)
+static inline void irq_set_priority_next_level(struct device *dev, uint32_t irq,
+		uint32_t prio, uint32_t flags)
 {
-	const struct irq_next_level_api *api = dev->driver_api;
+	const struct irq_next_level_api *api =
+		(const struct irq_next_level_api *)dev->driver_api;
 
 	if (api->intr_set_priority)
 		api->intr_set_priority(dev, irq, prio, flags);
@@ -125,14 +129,11 @@ static inline void irq_set_priority_next_level(struct device *dev, u32_t irq,
 static inline unsigned int irq_line_is_enabled_next_level(struct device *dev,
 							  unsigned int irq)
 {
-	const struct irq_next_level_api *api = dev->driver_api;
+	const struct irq_next_level_api *api =
+		(const struct irq_next_level_api *)dev->driver_api;
 
 	return api->intr_get_line_state(dev, irq);
 }
-
-/**
- * @}
- */
 
 #ifdef __cplusplus
 }

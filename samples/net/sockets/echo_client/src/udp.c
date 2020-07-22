@@ -16,6 +16,7 @@ LOG_MODULE_DECLARE(net_echo_client_sample, LOG_LEVEL_DBG);
 
 #include <net/socket.h>
 #include <net/tls_credentials.h>
+#include <random/rand32.h>
 
 #include "common.h"
 #include "ca_certificate.h"
@@ -32,7 +33,8 @@ static int send_udp_data(struct data *data)
 
 	do {
 		data->udp.expecting = sys_rand32_get() % ipsum_len;
-	} while (data->udp.expecting == 0U);
+	} while (data->udp.expecting == 0U ||
+		 data->udp.expecting > data->udp.mtu);
 
 	ret = send(data->udp.sock, lorem_ipsum, data->udp.expecting, 0);
 
@@ -43,7 +45,7 @@ static int send_udp_data(struct data *data)
 	return ret < 0 ? -EIO : 0;
 }
 
-static int compare_udp_data(struct data *data, const char *buf, u32_t received)
+static int compare_udp_data(struct data *data, const char *buf, uint32_t received)
 {
 	if (received != data->udp.expecting) {
 		LOG_ERR("Invalid amount of data received: UDP %s", data->proto);
@@ -252,7 +254,7 @@ void stop_udp(void)
 		k_delayed_work_cancel(&conf.ipv6.udp.recv);
 		k_delayed_work_cancel(&conf.ipv6.udp.transmit);
 
-		if (conf.ipv6.udp.sock > 0) {
+		if (conf.ipv6.udp.sock >= 0) {
 			(void)close(conf.ipv6.udp.sock);
 		}
 	}
@@ -261,7 +263,7 @@ void stop_udp(void)
 		k_delayed_work_cancel(&conf.ipv4.udp.recv);
 		k_delayed_work_cancel(&conf.ipv4.udp.transmit);
 
-		if (conf.ipv4.udp.sock > 0) {
+		if (conf.ipv4.udp.sock >= 0) {
 			(void)close(conf.ipv4.udp.sock);
 		}
 	}

@@ -17,17 +17,17 @@ LOG_MODULE_REGISTER(usb_transport);
 
 /* callback function list */
 static int usb_transport_get_report(struct usb_setup_packet *setup,
-		s32_t *len, u8_t **data);
+		int32_t *len, uint8_t **data);
 static int usb_transport_get_idle(struct usb_setup_packet *setup,
-		s32_t *len, u8_t **data);
+		int32_t *len, uint8_t **data);
 static int usb_transport_get_protocol(struct usb_setup_packet *setup,
-		s32_t *len, u8_t **data);
+		int32_t *len, uint8_t **data);
 static int usb_transport_set_report(struct usb_setup_packet *setup,
-		s32_t *len, u8_t **data);
+		int32_t *len, uint8_t **data);
 static int usb_transport_set_idle(struct usb_setup_packet *setup,
-		s32_t *len, u8_t **data);
+		int32_t *len, uint8_t **data);
 static int usb_transport_set_protocol(struct usb_setup_packet *setup,
-		s32_t *len, u8_t **data);
+		int32_t *len, uint8_t **data);
 static void usb_transport_host_ready(void);
 
 static const struct hid_ops usb_transport_callbacks = {
@@ -41,7 +41,7 @@ static const struct hid_ops usb_transport_callbacks = {
 };
 
 /* create an HID report descriptor with input and output reports */
-static const u8_t usb_transport_hid_report_desc[] = {
+static const uint8_t usb_transport_hid_report_desc[] = {
 	/* Usage page: vendor defined */
 	HID_GLOBAL_ITEM(ITEM_TAG_USAGE_PAGE, 2), 0x00, 0xFF,
 
@@ -82,6 +82,8 @@ static struct device *hid_device;
 
 int usb_transport_init(usb_transport_receive_callback_t callback)
 {
+	int ret;
+
 	hid_device = device_get_binding("HID_0");
 
 	if (hid_device == NULL) {
@@ -96,14 +98,20 @@ int usb_transport_init(usb_transport_receive_callback_t callback)
 
 	receive_data_cb = callback;
 
+	ret = usb_enable(NULL);
+	if (ret != 0) {
+		LOG_ERR("Failed to enable USB");
+		return -EIO;
+	}
+
 	/* initialize USB interface and HID class */
 	return usb_hid_init(hid_device);
 }
 
-int usb_transport_send_reply(u8_t *data, u32_t len)
+int usb_transport_send_reply(uint8_t *data, uint32_t len)
 {
 	int ret = 0;
-	u32_t written = 0;
+	uint32_t written = 0;
 	union usb_hid_report_hdr *header;
 
 	/* roll back buffer to point to header */
@@ -123,7 +131,7 @@ int usb_transport_send_reply(u8_t *data, u32_t len)
 			len -= USB_TPORT_HID_REPORT_DATA_LEN;
 		}
 
-		ret = hid_int_ep_write(hid_device, (u8_t *)header,
+		ret = hid_int_ep_write(hid_device, (uint8_t *)header,
 				USB_TPORT_HID_REPORT_COUNT, &written);
 
 		if (ret) {
@@ -140,7 +148,7 @@ int usb_transport_send_reply(u8_t *data, u32_t len)
 		}
 
 		/* move pointer to fill next header */
-		header = (union usb_hid_report_hdr *)((u8_t *)header +
+		header = (union usb_hid_report_hdr *)((uint8_t *)header +
 				USB_TPORT_HID_REPORT_DATA_LEN);
 	}
 
@@ -148,31 +156,31 @@ int usb_transport_send_reply(u8_t *data, u32_t len)
 }
 
 static int usb_transport_get_report(struct usb_setup_packet *setup,
-		s32_t *len, u8_t **data)
+		int32_t *len, uint8_t **data)
 {
 	LOG_DBG("usb_transport_get_report");
 	return 0;
 }
 
 static int usb_transport_get_idle(struct usb_setup_packet *setup,
-		s32_t *len, u8_t **data)
+		int32_t *len, uint8_t **data)
 {
 	LOG_DBG("usb_transport_get_idle");
 	return 0;
 }
 
 static int usb_transport_get_protocol(struct usb_setup_packet *setup,
-		s32_t *len, u8_t **data)
+		int32_t *len, uint8_t **data)
 {
 	LOG_DBG("usb_transport_get_protocol");
 	return 0;
 }
 
 static int usb_transport_set_report(struct usb_setup_packet *setup,
-		s32_t *len, u8_t **data)
+		int32_t *len, uint8_t **data)
 {
-	u8_t	*buffer;
-	s32_t	size;
+	uint8_t	*buffer;
+	int32_t	size;
 
 	/* strip the HID header */
 	buffer = *data + sizeof(union usb_hid_report_hdr);
@@ -183,14 +191,14 @@ static int usb_transport_set_report(struct usb_setup_packet *setup,
 }
 
 static int usb_transport_set_idle(struct usb_setup_packet *setup,
-		s32_t *len, u8_t **data)
+		int32_t *len, uint8_t **data)
 {
 	LOG_DBG("usb_transport_set_idle");
 	return 0;
 }
 
 static int usb_transport_set_protocol(struct usb_setup_packet *setup,
-		s32_t *len, u8_t **data)
+		int32_t *len, uint8_t **data)
 {
 	LOG_DBG("usb_transport_set_protocol");
 	return 0;

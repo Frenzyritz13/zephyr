@@ -35,7 +35,7 @@ extern "C" {
  */
 
 
-typedef u8_t i2s_fmt_t;
+typedef uint8_t i2s_fmt_t;
 
 /** Data Format bit field position. */
 #define I2S_FMT_DATA_FORMAT_SHIFT           0
@@ -167,7 +167,7 @@ typedef u8_t i2s_fmt_t;
 #define I2S_FMT_CLK_IF_NB		(2 << I2S_FMT_CLK_FORMAT_SHIFT)
 #define I2S_FMT_CLK_IF_IB		(3 << I2S_FMT_CLK_FORMAT_SHIFT)
 
-typedef u8_t i2s_opt_t;
+typedef uint8_t i2s_opt_t;
 
 /** Run bit clock continuously */
 #define I2S_OPT_BIT_CLK_CONT                (0 << 0)
@@ -294,18 +294,17 @@ enum i2s_trigger_cmd {
  * @param mem_slab memory slab to store RX/TX data.
  * @param block_size Size of one RX/TX memory block (buffer) in bytes.
  * @param timeout Read/Write timeout. Number of milliseconds to wait in case TX
- *        queue is full, RX queue is empty or one of the special values
- *        K_NO_WAIT, K_FOREVER.
+ *        queue is full or RX queue is empty, or 0, or SYS_FOREVER_MS.
  */
 struct i2s_config {
-	u8_t word_size;
-	u8_t channels;
+	uint8_t word_size;
+	uint8_t channels;
 	i2s_fmt_t format;
 	i2s_opt_t options;
-	u32_t frame_clk_freq;
+	uint32_t frame_clk_freq;
 	struct k_mem_slab *mem_slab;
 	size_t block_size;
-	s32_t timeout;
+	int32_t timeout;
 };
 
 /**
@@ -313,7 +312,7 @@ struct i2s_config {
  *
  * For internal use only, skip these in public documentation.
  */
-struct i2s_driver_api {
+__subsystem struct i2s_driver_api {
 	int (*configure)(struct device *dev, enum i2s_dir dir,
 			 struct i2s_config *cfg);
 	struct i2s_config *(*config_get)(struct device *dev,
@@ -352,7 +351,8 @@ __syscall int i2s_configure(struct device *dev, enum i2s_dir dir,
 static inline int z_impl_i2s_configure(struct device *dev, enum i2s_dir dir,
 				      struct i2s_config *cfg)
 {
-	const struct i2s_driver_api *api = dev->driver_api;
+	const struct i2s_driver_api *api =
+		(const struct i2s_driver_api *)dev->driver_api;
 
 	return api->configure(dev, dir, cfg);
 }
@@ -368,7 +368,8 @@ static inline int z_impl_i2s_configure(struct device *dev, enum i2s_dir dir,
 static inline struct i2s_config *i2s_config_get(struct device *dev,
 						enum i2s_dir dir)
 {
-	const struct i2s_driver_api *api = dev->driver_api;
+	const struct i2s_driver_api *api =
+		(const struct i2s_driver_api *)dev->driver_api;
 
 	return api->config_get(dev, dir);
 }
@@ -407,7 +408,8 @@ static inline struct i2s_config *i2s_config_get(struct device *dev,
 static inline int i2s_read(struct device *dev, void **mem_block,
 				 size_t *size)
 {
-	const struct i2s_driver_api *api = dev->driver_api;
+	const struct i2s_driver_api *api =
+		(const struct i2s_driver_api *)dev->driver_api;
 
 	return api->read(dev, mem_block, size);
 }
@@ -466,7 +468,8 @@ __syscall int i2s_buf_read(struct device *dev, void *buf, size_t *size);
  */
 static inline int i2s_write(struct device *dev, void *mem_block, size_t size)
 {
-	const struct i2s_driver_api *api = dev->driver_api;
+	const struct i2s_driver_api *api =
+		(const struct i2s_driver_api *)dev->driver_api;
 
 	return api->write(dev, mem_block, size);
 }
@@ -511,7 +514,8 @@ __syscall int i2s_trigger(struct device *dev, enum i2s_dir dir,
 static inline int z_impl_i2s_trigger(struct device *dev, enum i2s_dir dir,
 				    enum i2s_trigger_cmd cmd)
 {
-	const struct i2s_driver_api *api = dev->driver_api;
+	const struct i2s_driver_api *api =
+		(const struct i2s_driver_api *)dev->driver_api;
 
 	return api->trigger(dev, dir, cmd);
 }

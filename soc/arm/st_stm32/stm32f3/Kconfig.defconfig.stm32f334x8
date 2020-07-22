@@ -1,9 +1,7 @@
-# Kconfig - ST Microelectronics STM32F334X8 MCU
-#
+# ST Microelectronics STM32F334X8 MCU
+
 # Copyright (c) 2016 RnDity Sp. z o.o.
-#
 # SPDX-License-Identifier: Apache-2.0
-#
 
 if SOC_STM32F334X8
 
@@ -12,12 +10,5 @@ config SOC
 
 config NUM_IRQS
 	default 82
-
-if GPIO_STM32
-
-config GPIO_STM32_PORTF
-	default y
-
-endif # GPIO_STM32
 
 endif # SOC_STM32F334X8

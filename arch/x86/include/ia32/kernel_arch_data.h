@@ -29,12 +29,10 @@
 #include <toolchain.h>
 #include <linker/sections.h>
 #include <ia32/exception.h>
-#include <kernel_arch_thread.h>
 #include <sys/util.h>
 
 #ifndef _ASMLANGUAGE
 #include <kernel.h>
-#include <kernel_internal.h>
 #include <zephyr/types.h>
 #include <sys/dlist.h>
 #endif
@@ -46,13 +44,9 @@
 #define _THREAD_WRAPPER_REQUIRED
 #endif
 
-/* increase to 16 bytes (or more?) to support SSE/SSE2 instructions? */
-
-#define STACK_ALIGN_SIZE 4
-
-#if defined(CONFIG_LAZY_FP_SHARING) && defined(CONFIG_SSE)
+#if defined(CONFIG_LAZY_FPU_SHARING) && defined(CONFIG_SSE)
 #define _FP_USER_MASK (K_FP_REGS | K_SSE_REGS)
-#elif defined(CONFIG_LAZY_FP_SHARING)
+#elif defined(CONFIG_LAZY_FPU_SHARING)
 #define _FP_USER_MASK (K_FP_REGS)
 #endif
 

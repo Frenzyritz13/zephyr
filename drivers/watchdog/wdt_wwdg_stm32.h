@@ -8,7 +8,7 @@
 #define ZEPHYR_DRIVERS_WATCHDOG_WWDG_STM32_H_
 
 #include <zephyr/types.h>
-#include <clock_control/stm32_clock_control.h>
+#include <drivers/clock_control/stm32_clock_control.h>
 #include <drivers/clock_control.h>
 
 /**
@@ -30,14 +30,14 @@ struct wwdg_stm32_config {
 /* driver data */
 struct wwdg_stm32_data {
 	/* WWDG reset counter */
-	u8_t counter;
+	uint8_t counter;
 
 	/* WWDG user defined callback on EWI */
 	wdt_callback_t callback;
 };
 
 #define WWDG_STM32_CFG(dev) \
-	((const struct wwdg_stm32_config *const)(dev)->config->config_info)
+	((const struct wwdg_stm32_config *const)(dev)->config_info)
 
 #define WWDG_STM32_DATA(dev) \
 	((struct wwdg_stm32_data *const)(dev)->driver_data)

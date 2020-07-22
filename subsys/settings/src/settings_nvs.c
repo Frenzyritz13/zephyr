@@ -11,13 +11,14 @@
 #include "settings/settings.h"
 #include "settings/settings_nvs.h"
 #include "settings_priv.h"
+#include <storage/flash_map.h>
 
 #include <logging/log.h>
 LOG_MODULE_DECLARE(settings, CONFIG_SETTINGS_LOG_LEVEL);
 
 struct settings_nvs_read_fn_arg {
 	struct nvs_fs *fs;
-	u16_t id;
+	uint16_t id;
 };
 
 static int settings_nvs_load(struct settings_store *cs,
@@ -72,7 +73,7 @@ static int settings_nvs_load(struct settings_store *cs,
 	char name[SETTINGS_MAX_NAME_LEN + SETTINGS_EXTRA_LEN + 1];
 	char buf;
 	ssize_t rc1, rc2;
-	u16_t name_id = NVS_NAMECNT_ID;
+	uint16_t name_id = NVS_NAMECNT_ID;
 
 	name_id = cf->last_name_id + 1;
 
@@ -104,7 +105,7 @@ static int settings_nvs_load(struct settings_store *cs,
 			if (name_id == cf->last_name_id) {
 				cf->last_name_id--;
 				nvs_write(&cf->cf_nvs, NVS_NAMECNT_ID,
-					  &cf->last_name_id, sizeof(u16_t));
+					  &cf->last_name_id, sizeof(uint16_t));
 			}
 			nvs_delete(&cf->cf_nvs, name_id);
 			nvs_delete(&cf->cf_nvs, name_id + NVS_NAME_ID_OFFSET);
@@ -132,7 +133,7 @@ static int settings_nvs_save(struct settings_store *cs, const char *name,
 {
 	struct settings_nvs *cf = (struct settings_nvs *)cs;
 	char rdname[SETTINGS_MAX_NAME_LEN + SETTINGS_EXTRA_LEN + 1];
-	u16_t name_id, write_name_id;
+	uint16_t name_id, write_name_id;
 	bool delete, write_name;
 	int rc = 0;
 
@@ -172,13 +173,26 @@ static int settings_nvs_save(struct settings_store *cs, const char *name,
 		if ((delete) && (name_id == cf->last_name_id)) {
 			cf->last_name_id--;
 			rc = nvs_write(&cf->cf_nvs, NVS_NAMECNT_ID,
-				       &cf->last_name_id, sizeof(u16_t));
+				       &cf->last_name_id, sizeof(uint16_t));
+			if (rc < 0) {
+				/* Error: can't to store
+				 * the largest name ID in use.
+				 */
+				return rc;
+			}
 		}
 
 		if (delete) {
 			rc = nvs_delete(&cf->cf_nvs, name_id);
-			rc = nvs_delete(&cf->cf_nvs, name_id +
+
+			if (rc >= 0) {
+				rc = nvs_delete(&cf->cf_nvs, name_id +
 					NVS_NAME_ID_OFFSET);
+			}
+
+			if (rc < 0) {
+				return rc;
+			}
 
 			return 0;
 		}
@@ -203,13 +217,16 @@ static int settings_nvs_save(struct settings_store *cs, const char *name,
 	/* write the name if required */
 	if (write_name) {
 		rc = nvs_write(&cf->cf_nvs, write_name_id, name, strlen(name));
+		if (rc < 0) {
+			return rc;
+		}
 	}
 
 	/* update the last_name_id and write to flash if required*/
 	if (write_name_id > cf->last_name_id) {
 		cf->last_name_id = write_name_id;
 		rc = nvs_write(&cf->cf_nvs, NVS_NAMECNT_ID, &cf->last_name_id,
-			       sizeof(u16_t));
+			       sizeof(uint16_t));
 	}
 
 	if (rc < 0) {
@@ -223,7 +240,7 @@ static int settings_nvs_save(struct settings_store *cs, const char *name,
 int settings_nvs_backend_init(struct settings_nvs *cf)
 {
 	int rc;
-	u16_t last_name_id;
+	uint16_t last_name_id;
 
 	rc = nvs_init(&cf->cf_nvs, cf->flash_dev_name);
 	if (rc) {
@@ -240,4 +257,64 @@ int settings_nvs_backend_init(struct settings_nvs *cf)
 
 	LOG_DBG("Initialized");
 	return 0;
+}
+
+int settings_backend_init(void)
+{
+	static struct settings_nvs default_settings_nvs;
+	int rc;
+	uint16_t cnt = 0;
+	size_t nvs_sector_size, nvs_size = 0;
+	const struct flash_area *fa;
+	struct flash_sector hw_flash_sector;
+	uint32_t sector_cnt = 1;
+
+	rc = flash_area_open(FLASH_AREA_ID(storage), &fa);
+	if (rc) {
+		return rc;
+	}
+
+	rc = flash_area_get_sectors(FLASH_AREA_ID(storage), &sector_cnt,
+				    &hw_flash_sector);
+	if (rc == -ENODEV) {
+		return rc;
+	} else if (rc != 0 && rc != -ENOMEM) {
+		k_panic();
+	}
+
+	nvs_sector_size = CONFIG_SETTINGS_NVS_SECTOR_SIZE_MULT *
+			  hw_flash_sector.fs_size;
+
+	if (nvs_sector_size > UINT16_MAX) {
+		return -EDOM;
+	}
+
+	while (cnt < CONFIG_SETTINGS_NVS_SECTOR_COUNT) {
+		nvs_size += nvs_sector_size;
+		if (nvs_size > fa->fa_size) {
+			break;
+		}
+		cnt++;
+	}
+
+	/* define the nvs file system using the page_info */
+	default_settings_nvs.cf_nvs.sector_size = nvs_sector_size;
+	default_settings_nvs.cf_nvs.sector_count = cnt;
+	default_settings_nvs.cf_nvs.offset = fa->fa_off;
+	default_settings_nvs.flash_dev_name = fa->fa_dev_name;
+
+	rc = settings_nvs_backend_init(&default_settings_nvs);
+	if (rc) {
+		return rc;
+	}
+
+	rc = settings_nvs_src(&default_settings_nvs);
+
+	if (rc) {
+		return rc;
+	}
+
+	rc = settings_nvs_dst(&default_settings_nvs);
+
+	return rc;
 }

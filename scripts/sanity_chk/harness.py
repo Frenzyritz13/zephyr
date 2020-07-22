@@ -2,7 +2,7 @@
 import re
 from collections import OrderedDict
 
-result_re = re.compile("(PASS|FAIL|SKIP) - (test_)?(.*)")
+result_re = re.compile(".*(PASS|FAIL|SKIP) - (test_)?(.*)")
 
 class Harness:
     GCOV_START = "GCOV_COVERAGE_DUMP_START"
@@ -126,7 +126,7 @@ class Test(Harness):
 
     def handle(self, line):
         match = result_re.match(line)
-        if match:
+        if match and match.group(2):
             name = "{}.{}".format(self.id, match.group(3))
             self.tests[name] = match.group(1)
 
@@ -143,9 +143,17 @@ class Test(Harness):
             if self.FAULT in line:
                 self.fault = True
 
+        if self.state == "passed":
+            self.tests[self.id] = "PASS"
+        else:
+            self.tests[self.id] = "FAIL"
+
         if self.GCOV_START in line:
             self.capture_coverage = True
         elif self.GCOV_END in line:
             self.capture_coverage = False
 
         self.process_test(line)
+
+class Ztest(Test):
+    pass

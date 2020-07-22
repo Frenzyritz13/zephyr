@@ -4,15 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef ZEPHYR_INCLUDE_DRIVERS_LED_STRIP_H_
-#define ZEPHYR_INCLUDE_DRIVERS_LED_STRIP_H_
-
 /**
  * @file
  * @brief Public API for controlling linear strips of LEDs.
  *
  * This library abstracts the chipset drivers for individually
  * addressable strips of LEDs.
+ */
+
+#ifndef ZEPHYR_INCLUDE_DRIVERS_LED_STRIP_H_
+#define ZEPHYR_INCLUDE_DRIVERS_LED_STRIP_H_
+
+/**
+ * @brief LED Strip Interface
+ * @defgroup led_strip_interface LED Strip Interface
+ * @ingroup io_interfaces
+ * @{
  */
 
 #include <zephyr/types.h>
@@ -34,14 +41,14 @@ struct led_rgb {
 	 * Pad/scratch space needed by some drivers. Users should
 	 * ignore.
 	 */
-	u8_t scratch;
+	uint8_t scratch;
 #endif
 	/** Red channel */
-	u8_t r;
+	uint8_t r;
 	/** Green channel */
-	u8_t g;
+	uint8_t g;
 	/** Blue channel */
-	u8_t b;
+	uint8_t b;
 };
 
 /**
@@ -59,7 +66,7 @@ typedef int (*led_api_update_rgb)(struct device *dev, struct led_rgb *pixels,
  *
  * @see led_strip_update_channels() for argument descriptions.
  */
-typedef int (*led_api_update_channels)(struct device *dev, u8_t *channels,
+typedef int (*led_api_update_channels)(struct device *dev, uint8_t *channels,
 				       size_t num_channels);
 
 /**
@@ -114,7 +121,7 @@ static inline int led_strip_update_rgb(struct device *dev,
  * @warning May overwrite @a channels
  */
 static inline int led_strip_update_channels(struct device *dev,
-					    u8_t *channels,
+					    uint8_t *channels,
 					    size_t num_channels) {
 	const struct led_strip_driver_api *api =
 		(const struct led_strip_driver_api *)dev->driver_api;
@@ -125,5 +132,9 @@ static inline int led_strip_update_channels(struct device *dev,
 #ifdef __cplusplus
 }
 #endif
+
+/**
+ * @}
+ */
 
 #endif	/* ZEPHYR_INCLUDE_DRIVERS_LED_STRIP_H_ */

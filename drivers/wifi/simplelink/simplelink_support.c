@@ -52,8 +52,8 @@ struct nwp_status {
 	simplelink_wifi_cb_t cb;
 
 	/* Status Variables */
-	u32_t status;	/* The state of the NWP */
-	u32_t role;	/* The device's role (STA, P2P or AP) */
+	uint32_t status;	/* The state of the NWP */
+	uint32_t role;	/* The device's role (STA, P2P or AP) */
 
 	/* Scan results table: */
 	SlWlanNetworkEntry_t net_entries[CONFIG_WIFI_SIMPLELINK_SCAN_COUNT];
@@ -66,17 +66,15 @@ struct sl_connect_state sl_conn;
 static struct nwp_status nwp;
 
 /* Configure the device to a default state, resetting previous parameters .*/
-static s32_t configure_simplelink(void)
+static int32_t configure_simplelink(void)
 {
-	s32_t retval = -1;
-	s32_t mode = -1;
-#if !defined(CONFIG_NET_IPV6)
-	u32_t if_bitmap = 0U;
-#endif
+	int32_t retval = -1;
+	int32_t mode = -1;
+	uint32_t if_bitmap = 0U;
 	SlWlanScanParamCommand_t scan_default = { 0 };
 	SlWlanRxFilterOperationCommandBuff_t rx_filterid_mask = { { 0 } };
-	u8_t config_opt;
-	u8_t power;
+	uint8_t config_opt;
+	uint8_t power;
 
 #if defined(CONFIG_NET_IPV4) && defined(CONFIG_NET_CONFIG_MY_IPV4_ADDR)
 	struct in_addr addr4;
@@ -172,16 +170,17 @@ static s32_t configure_simplelink(void)
 	ASSERT_ON_ERROR(retval, NETAPP_ERROR);
 #endif
 
-
-#if !defined(CONFIG_NET_IPV6)
+#if defined(CONFIG_NET_IPV6)
+	if_bitmap = ~0;
+#else
 	/* Disable ipv6 */
 	if_bitmap = !(SL_NETCFG_IF_IPV6_STA_LOCAL |
 		      SL_NETCFG_IF_IPV6_STA_GLOBAL);
+#endif
 	retval = sl_NetCfgSet(SL_NETCFG_IF, SL_NETCFG_IF_STATE,
 			      sizeof(if_bitmap),
 			      (const unsigned char *)&if_bitmap);
 	ASSERT_ON_ERROR(retval, NETAPP_ERROR);
-#endif
 
 	/* Configure scan parameters to default */
 	scan_default.ChannelsMask = CHANNEL_MASK_ALL;
@@ -189,7 +188,7 @@ static s32_t configure_simplelink(void)
 
 	retval = sl_WlanSet(SL_WLAN_CFG_GENERAL_PARAM_ID,
 			    SL_WLAN_GENERAL_PARAM_OPT_SCAN_PARAMS,
-			    sizeof(scan_default), (u8_t *)&scan_default);
+			    sizeof(scan_default), (uint8_t *)&scan_default);
 	ASSERT_ON_ERROR(retval, WLAN_ERROR);
 
 	/* Disable scans: In other words, use "one-shot" scanning */
@@ -201,7 +200,7 @@ static s32_t configure_simplelink(void)
 	power = 0U;
 	retval = sl_WlanSet(SL_WLAN_CFG_GENERAL_PARAM_ID,
 			    SL_WLAN_GENERAL_PARAM_OPT_STA_TX_POWER, 1,
-			    (u8_t *)&power);
+			    (uint8_t *)&power);
 	ASSERT_ON_ERROR(retval, WLAN_ERROR);
 
 	/* Set NWP Power policy to 'normal' */
@@ -218,7 +217,7 @@ static s32_t configure_simplelink(void)
 
 	retval = sl_WlanSet(SL_WLAN_RX_FILTERS_ID, SL_WLAN_RX_FILTER_REMOVE,
 			    sizeof(SlWlanRxFilterOperationCommandBuff_t),
-			    (u8_t *)&rx_filterid_mask);
+			    (uint8_t *)&rx_filterid_mask);
 	ASSERT_ON_ERROR(retval, WLAN_ERROR);
 
 	/* Set NWP role as STA */
@@ -363,14 +362,14 @@ void SimpleLinkWlanEventHandler(SlWlanEvent_t *wlan_event)
 void SimpleLinkNetAppEventHandler(SlNetAppEvent_t *netapp_event)
 {
 	SlIpV4AcquiredAsync_t *event_data = NULL;
-	u32_t i;
+	uint32_t i;
 
 	if (!netapp_event) {
 		return;
 	}
 
 	switch (netapp_event->Id) {
-	case SL_DEVICE_EVENT_DROPPED_NETAPP_IPACQUIRED:
+	case SL_NETAPP_EVENT_IPV4_ACQUIRED:
 		SET_STATUS_BIT(nwp.status, STATUS_BIT_IP_ACQUIRED);
 
 		/* Ip Acquired Event Data */
@@ -395,7 +394,7 @@ void SimpleLinkNetAppEventHandler(SlNetAppEvent_t *netapp_event)
 		nwp.cb(SIMPLELINK_WIFI_CB_IPACQUIRED, &sl_conn);
 		break;
 
-	case SL_DEVICE_EVENT_DROPPED_NETAPP_IPACQUIRED_V6:
+	case SL_NETAPP_EVENT_IPV6_ACQUIRED:
 		SET_STATUS_BIT(nwp.status, STATUS_BIT_IPV6_ACQUIRED);
 
 		for (i = 0U; i < 4; i++) {
@@ -404,15 +403,20 @@ void SimpleLinkNetAppEventHandler(SlNetAppEvent_t *netapp_event)
 		}
 
 		if (LOG_LEVEL >= LOG_LEVEL_INF) {
-			char ipv6_addr[NET_IPV6_ADDR_LEN];
+			LOG_INF("[NETAPP EVENT] IP Acquired: "
+				"IPv6=%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x",
+				((sl_conn.ipv6_addr[0] >> 16) & 0xffff),
+				sl_conn.ipv6_addr[0] & 0xffff,
+				((sl_conn.ipv6_addr[1] >> 16) & 0xffff),
+				sl_conn.ipv6_addr[1] & 0xffff,
+				((sl_conn.ipv6_addr[2] >> 16) & 0xffff),
+				sl_conn.ipv6_addr[2] & 0xffff,
+				((sl_conn.ipv6_addr[3] >> 16) & 0xffff),
+				sl_conn.ipv6_addr[3] & 0xffff);
 
-			net_addr_ntop(AF_INET6, sl_conn.ipv6_addr,
-				      ipv6_addr,
-				      sizeof(ipv6_addr));
-			LOG_INF("[NETAPP EVENT] IP Acquired: IPv6= %s",
-				    ipv6_addr);
 		}
 
+		nwp.cb(SIMPLELINK_WIFI_CB_IPV6ACQUIRED, &sl_conn);
 		break;
 
 	case SL_DEVICE_EVENT_DROPPED_NETAPP_IP_LEASED:
@@ -531,7 +535,7 @@ void SimpleLinkNetAppRequestEventHandler(SlNetAppRequest_t *netapp_request,
 }
 
 /* Unused, but must be defined to link.	 */
-void SimpleLinkNetAppRequestMemFreeEventHandler(u8_t *buffer)
+void SimpleLinkNetAppRequestMemFreeEventHandler(uint8_t *buffer)
 {
 	ARG_UNUSED(buffer);
 }
@@ -570,7 +574,7 @@ void z_simplelink_get_scan_result(int index,
 
 int z_simplelink_start_scan(void)
 {
-	s32_t ret;
+	int32_t ret;
 
 	/* Clear the results buffer */
 	(void)memset(&nwp.net_entries, 0x0, sizeof(nwp.net_entries));
@@ -588,11 +592,11 @@ int z_simplelink_start_scan(void)
 
 void z_simplelink_get_mac(unsigned char *mac)
 {
-	u16_t mac_len = SL_MAC_ADDR_LEN;
-	u16_t config_opt = 0U;
+	uint16_t mac_len = SL_MAC_ADDR_LEN;
+	uint16_t config_opt = 0U;
 
 	sl_NetCfgGet(SL_NETCFG_MAC_ADDRESS_GET, &config_opt,
-		     &mac_len, (u8_t *)mac);
+		     &mac_len, (uint8_t *)mac);
 }
 
 int z_simplelink_connect(struct wifi_connect_req_params *params)

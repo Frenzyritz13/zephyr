@@ -47,25 +47,11 @@
 #define ESS_EQUAL_TO_REF_VALUE			0x08
 #define ESS_NOT_EQUAL_TO_REF_VALUE		0x09
 
-static inline void int_to_le24(u32_t value, u8_t *u24)
-{
-	u24[0] = value & 0xff;
-	u24[1] = (value >> 8) & 0xff;
-	u24[2] = (value >> 16) & 0xff;
-}
-
-static inline u32_t le24_to_int(const u8_t *u24)
-{
-	return ((u32_t)u24[0] |
-		(u32_t)u24[1] << 8 |
-		(u32_t)u24[2] << 16);
-}
-
 static ssize_t read_u16(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-			void *buf, u16_t len, u16_t offset)
+			void *buf, uint16_t len, uint16_t offset)
 {
-	const u16_t *u16 = attr->user_data;
-	u16_t value = sys_cpu_to_le16(*u16);
+	const uint16_t *u16 = attr->user_data;
+	uint16_t value = sys_cpu_to_le16(*u16);
 
 	return bt_gatt_attr_read(conn, attr, buf, len, offset, &value,
 				 sizeof(value));
@@ -74,33 +60,33 @@ static ssize_t read_u16(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 /* Environmental Sensing Service Declaration */
 
 struct es_measurement {
-	u16_t flags; /* Reserved for Future Use */
-	u8_t sampling_func;
-	u32_t meas_period;
-	u32_t update_interval;
-	u8_t application;
-	u8_t meas_uncertainty;
+	uint16_t flags; /* Reserved for Future Use */
+	uint8_t sampling_func;
+	uint32_t meas_period;
+	uint32_t update_interval;
+	uint8_t application;
+	uint8_t meas_uncertainty;
 };
 
 struct temperature_sensor {
-	s16_t temp_value;
+	int16_t temp_value;
 
 	/* Valid Range */
-	s16_t lower_limit;
-	s16_t upper_limit;
+	int16_t lower_limit;
+	int16_t upper_limit;
 
 	/* ES trigger setting - Value Notification condition */
-	u8_t condition;
+	uint8_t condition;
 	union {
-		u32_t seconds;
-		s16_t ref_val; /* Reference temperature */
+		uint32_t seconds;
+		int16_t ref_val; /* Reference temperature */
 	};
 
 	struct es_measurement meas;
 };
 
 struct humidity_sensor {
-	s16_t humid_value;
+	int16_t humid_value;
 
 	struct es_measurement meas;
 };
@@ -140,31 +126,31 @@ static struct humidity_sensor sensor_3 = {
 };
 
 static void temp_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-				 u16_t value)
+				 uint16_t value)
 {
 	simulate_temp = value == BT_GATT_CCC_NOTIFY;
 }
 
 struct read_es_measurement_rp {
-	u16_t flags; /* Reserved for Future Use */
-	u8_t sampling_function;
-	u8_t measurement_period[3];
-	u8_t update_interval[3];
-	u8_t application;
-	u8_t measurement_uncertainty;
+	uint16_t flags; /* Reserved for Future Use */
+	uint8_t sampling_function;
+	uint8_t measurement_period[3];
+	uint8_t update_interval[3];
+	uint8_t application;
+	uint8_t measurement_uncertainty;
 } __packed;
 
 static ssize_t read_es_measurement(struct bt_conn *conn,
 				   const struct bt_gatt_attr *attr, void *buf,
-				   u16_t len, u16_t offset)
+				   uint16_t len, uint16_t offset)
 {
 	const struct es_measurement *value = attr->user_data;
 	struct read_es_measurement_rp rsp;
 
 	rsp.flags = sys_cpu_to_le16(value->flags);
 	rsp.sampling_function = value->sampling_func;
-	int_to_le24(value->meas_period, rsp.measurement_period);
-	int_to_le24(value->update_interval, rsp.update_interval);
+	sys_put_le24(value->meas_period, rsp.measurement_period);
+	sys_put_le24(value->update_interval, rsp.update_interval);
 	rsp.application = value->application;
 	rsp.measurement_uncertainty = value->meas_uncertainty;
 
@@ -174,10 +160,10 @@ static ssize_t read_es_measurement(struct bt_conn *conn,
 
 static ssize_t read_temp_valid_range(struct bt_conn *conn,
 				     const struct bt_gatt_attr *attr, void *buf,
-				     u16_t len, u16_t offset)
+				     uint16_t len, uint16_t offset)
 {
 	const struct temperature_sensor *sensor = attr->user_data;
-	u16_t tmp[] = {sys_cpu_to_le16(sensor->lower_limit),
+	uint16_t tmp[] = {sys_cpu_to_le16(sensor->lower_limit),
 			  sys_cpu_to_le16(sensor->upper_limit)};
 
 	return bt_gatt_attr_read(conn, attr, buf, len, offset, tmp,
@@ -185,19 +171,19 @@ static ssize_t read_temp_valid_range(struct bt_conn *conn,
 }
 
 struct es_trigger_setting_seconds {
-	u8_t condition;
-	u8_t sec[3];
+	uint8_t condition;
+	uint8_t sec[3];
 } __packed;
 
 struct es_trigger_setting_reference {
-	u8_t condition;
-	s16_t ref_val;
+	uint8_t condition;
+	int16_t ref_val;
 } __packed;
 
 static ssize_t read_temp_trigger_setting(struct bt_conn *conn,
 					 const struct bt_gatt_attr *attr,
-					 void *buf, u16_t len,
-					 u16_t offset)
+					 void *buf, uint16_t len,
+					 uint16_t offset)
 {
 	const struct temperature_sensor *sensor = attr->user_data;
 
@@ -216,7 +202,7 @@ static ssize_t read_temp_trigger_setting(struct bt_conn *conn,
 			struct es_trigger_setting_seconds rp;
 
 			rp.condition = sensor->condition;
-			int_to_le24(sensor->seconds, rp.sec);
+			sys_put_le24(sensor->seconds, rp.sec);
 
 			return bt_gatt_attr_read(conn, attr, buf, len, offset,
 						 &rp, sizeof(rp));
@@ -234,8 +220,8 @@ static ssize_t read_temp_trigger_setting(struct bt_conn *conn,
 	}
 }
 
-static bool check_condition(u8_t condition, s16_t old_val, s16_t new_val,
-			    s16_t ref_val)
+static bool check_condition(uint8_t condition, int16_t old_val, int16_t new_val,
+			    int16_t ref_val)
 {
 	switch (condition) {
 	case ESS_TRIGGER_INACTIVE:
@@ -264,7 +250,7 @@ static bool check_condition(u8_t condition, s16_t old_val, s16_t new_val,
 }
 
 static void update_temperature(struct bt_conn *conn,
-			       const struct bt_gatt_attr *chrc, s16_t value,
+			       const struct bt_gatt_attr *chrc, int16_t value,
 			       struct temperature_sensor *sensor)
 {
 	bool notify = check_condition(sensor->condition,
@@ -328,8 +314,8 @@ BT_GATT_SERVICE_DEFINE(ess_svc,
 
 static void ess_simulate(void)
 {
-	static u8_t i;
-	u16_t val;
+	static uint8_t i;
+	uint16_t val;
 
 	if (!(i % SENSOR_1_UPDATE_IVAL)) {
 		val = 1200 + i;
@@ -359,7 +345,7 @@ static const struct bt_data ad[] = {
 	/* TODO: Include Service Data AD */
 };
 
-static void connected(struct bt_conn *conn, u8_t err)
+static void connected(struct bt_conn *conn, uint8_t err)
 {
 	if (err) {
 		printk("Connection failed (err 0x%02x)\n", err);
@@ -368,7 +354,7 @@ static void connected(struct bt_conn *conn, u8_t err)
 	}
 }
 
-static void disconnected(struct bt_conn *conn, u8_t reason)
+static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
 	printk("Disconnected (reason 0x%02x)\n", reason);
 }
@@ -378,12 +364,9 @@ static struct bt_conn_cb conn_callbacks = {
 	.disconnected = disconnected,
 };
 
-static void bt_ready(int err)
+static void bt_ready(void)
 {
-	if (err) {
-		printk("Bluetooth init failed (err %d)\n", err);
-		return;
-	}
+	int err;
 
 	printk("Bluetooth initialized\n");
 
@@ -422,7 +405,7 @@ static struct bt_conn_auth_cb auth_cb_display = {
 
 static void bas_notify(void)
 {
-	u8_t battery_level = bt_gatt_bas_get_battery_level();
+	uint8_t battery_level = bt_gatt_bas_get_battery_level();
 
 	battery_level--;
 
@@ -437,17 +420,19 @@ void main(void)
 {
 	int err;
 
-	err = bt_enable(bt_ready);
+	err = bt_enable(NULL);
 	if (err) {
 		printk("Bluetooth init failed (err %d)\n", err);
 		return;
 	}
 
+	bt_ready();
+
 	bt_conn_cb_register(&conn_callbacks);
 	bt_conn_auth_cb_register(&auth_cb_display);
 
 	while (1) {
-		k_sleep(MSEC_PER_SEC);
+		k_sleep(K_SECONDS(1));
 
 		/* Temperature simulation */
 		if (simulate_temp) {

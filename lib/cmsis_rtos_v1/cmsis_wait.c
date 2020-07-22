@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <kernel_structs.h>
+#include <kernel.h>
 #include <cmsis_os.h>
 
 /**
@@ -16,6 +16,6 @@ osStatus osDelay(uint32_t delay_ms)
 		return osErrorISR;
 	}
 
-	k_sleep(delay_ms);
+	k_msleep(delay_ms);
 	return osEventTimeout;
 }

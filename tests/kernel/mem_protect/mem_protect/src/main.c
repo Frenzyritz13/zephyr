@@ -48,11 +48,11 @@ extern void test_create_new_supervisor_thread_from_user(void);
 extern void test_create_new_essential_thread_from_user(void);
 extern void test_create_new_higher_prio_thread_from_user(void);
 extern void test_create_new_invalid_prio_thread_from_user(void);
+extern void test_inherit_resource_pool(void);
 
 void test_main(void)
 {
 	k_thread_priority_set(k_current_get(), -1);
-	k_object_access_all_grant(&barrier_sem);
 
 	ztest_test_suite(memory_protection_test_suite,
 			 ztest_unit_test(test_permission_inheritance),
@@ -91,6 +91,7 @@ void test_main(void)
 			 ztest_unit_test(test_create_new_supervisor_thread_from_user),
 			 ztest_unit_test(test_create_new_essential_thread_from_user),
 			 ztest_unit_test(test_create_new_higher_prio_thread_from_user),
+			 ztest_unit_test(test_inherit_resource_pool),
 			 ztest_unit_test(test_create_new_invalid_prio_thread_from_user)
 			 );
 	ztest_run_test_suite(memory_protection_test_suite);

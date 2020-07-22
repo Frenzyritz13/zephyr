@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#define DT_DRV_COMPAT bosch_bma280
+
 #include <device.h>
 #include <drivers/i2c.h>
 #include <sys/util.h>
@@ -15,13 +17,25 @@
 #include <logging/log.h>
 LOG_MODULE_DECLARE(BMA280, CONFIG_SENSOR_LOG_LEVEL);
 
+static inline void setup_int1(struct device *dev,
+			      bool enable)
+{
+	struct bma280_data *data = dev->driver_data;
+
+	gpio_pin_interrupt_configure(data->gpio,
+				     DT_INST_GPIO_PIN(0, int1_gpios),
+				     (enable
+				      ? GPIO_INT_EDGE_TO_ACTIVE
+				      : GPIO_INT_DISABLE));
+}
+
 int bma280_attr_set(struct device *dev,
 		    enum sensor_channel chan,
 		    enum sensor_attribute attr,
 		    const struct sensor_value *val)
 {
 	struct bma280_data *drv_data = dev->driver_data;
-	u64_t slope_th;
+	uint64_t slope_th;
 
 	if (chan != SENSOR_CHAN_ACCEL_XYZ) {
 		return -ENOTSUP;
@@ -29,10 +43,10 @@ int bma280_attr_set(struct device *dev,
 
 	if (attr == SENSOR_ATTR_SLOPE_TH) {
 		/* slope_th = (val * 10^6 * 2^10) / BMA280_PMU_FULL_RAGE */
-		slope_th = (u64_t)val->val1 * 1000000U + (u64_t)val->val2;
+		slope_th = (uint64_t)val->val1 * 1000000U + (uint64_t)val->val2;
 		slope_th = (slope_th * (1 << 10)) / BMA280_PMU_FULL_RANGE;
 		if (i2c_reg_write_byte(drv_data->i2c, BMA280_I2C_ADDRESS,
-				       BMA280_REG_SLOPE_TH, (u8_t)slope_th)
+				       BMA280_REG_SLOPE_TH, (uint8_t)slope_th)
 				       < 0) {
 			LOG_DBG("Could not set slope threshold");
 			return -EIO;
@@ -54,14 +68,14 @@ int bma280_attr_set(struct device *dev,
 }
 
 static void bma280_gpio_callback(struct device *dev,
-				 struct gpio_callback *cb, u32_t pins)
+				 struct gpio_callback *cb, uint32_t pins)
 {
 	struct bma280_data *drv_data =
 		CONTAINER_OF(cb, struct bma280_data, gpio_cb);
 
 	ARG_UNUSED(pins);
 
-	gpio_pin_disable_callback(dev, CONFIG_BMA280_GPIO_PIN_NUM);
+	setup_int1(drv_data->dev, false);
 
 #if defined(CONFIG_BMA280_TRIGGER_OWN_THREAD)
 	k_sem_give(&drv_data->gpio_sem);
@@ -74,7 +88,7 @@ static void bma280_thread_cb(void *arg)
 {
 	struct device *dev = arg;
 	struct bma280_data *drv_data = dev->driver_data;
-	u8_t status = 0U;
+	uint8_t status = 0U;
 	int err = 0;
 
 	/* check for data ready */
@@ -108,7 +122,7 @@ static void bma280_thread_cb(void *arg)
 		}
 	}
 
-	gpio_pin_enable_callback(drv_data->gpio, CONFIG_BMA280_GPIO_PIN_NUM);
+	setup_int1(dev, true);
 }
 
 #ifdef CONFIG_BMA280_TRIGGER_OWN_THREAD
@@ -209,20 +223,22 @@ int bma280_init_interrupt(struct device *dev)
 	}
 
 	/* setup data ready gpio interrupt */
-	drv_data->gpio = device_get_binding(CONFIG_BMA280_GPIO_DEV_NAME);
+	drv_data->gpio =
+		device_get_binding(DT_INST_GPIO_LABEL(0, int1_gpios));
 	if (drv_data->gpio == NULL) {
 		LOG_DBG("Cannot get pointer to %s device",
-		    CONFIG_BMA280_GPIO_DEV_NAME);
+		    DT_INST_GPIO_LABEL(0, int1_gpios));
 		return -EINVAL;
 	}
 
-	gpio_pin_configure(drv_data->gpio, CONFIG_BMA280_GPIO_PIN_NUM,
-			   GPIO_DIR_IN | GPIO_INT | GPIO_INT_LEVEL |
-			   GPIO_INT_ACTIVE_HIGH | GPIO_INT_DEBOUNCE);
+	gpio_pin_configure(drv_data->gpio,
+			   DT_INST_GPIO_PIN(0, int1_gpios),
+			   DT_INST_GPIO_FLAGS(0, int1_gpios)
+			   | GPIO_INPUT);
 
 	gpio_init_callback(&drv_data->gpio_cb,
 			   bma280_gpio_callback,
-			   BIT(CONFIG_BMA280_GPIO_PIN_NUM));
+			   BIT(DT_INST_GPIO_PIN(0, int1_gpios)));
 
 	if (gpio_add_callback(drv_data->gpio, &drv_data->gpio_cb) < 0) {
 		LOG_DBG("Could not set gpio callback");
@@ -262,6 +278,8 @@ int bma280_init_interrupt(struct device *dev)
 		return -EIO;
 	}
 
+	drv_data->dev = dev;
+
 #if defined(CONFIG_BMA280_TRIGGER_OWN_THREAD)
 	k_sem_init(&drv_data->gpio_sem, 0, UINT_MAX);
 
@@ -272,10 +290,9 @@ int bma280_init_interrupt(struct device *dev)
 			0, K_NO_WAIT);
 #elif defined(CONFIG_BMA280_TRIGGER_GLOBAL_THREAD)
 	drv_data->work.handler = bma280_work_cb;
-	drv_data->dev = dev;
 #endif
 
-	gpio_pin_enable_callback(drv_data->gpio, CONFIG_BMA280_GPIO_PIN_NUM);
+	setup_int1(dev, true);
 
 	return 0;
 }

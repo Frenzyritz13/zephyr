@@ -6,9 +6,10 @@
  */
 
 #include <soc.h>
-#include <clock_control.h>
-#include <misc/util.h>
-#include <clock_control/stm32_clock_control.h>
+#include <drivers/clock_control.h>
+#include <sys/util.h>
+#include <drivers/clock_control/stm32_clock_control.h>
+#include "stm32_hsem.h"
 
 /* Macros to fill up prescaler values */
 #define z_sysclk_prescaler(v) LL_RCC_SYSCLK_DIV_ ## v
@@ -41,22 +42,7 @@
 #endif
 #endif /* CONFIG_CPU_CORTEX_M7 */
 
-/**
- * @brief fill in AHB/APB buses configuration structure
- */
-#if !defined(CONFIG_CPU_CORTEX_M4)
-static void config_bus_prescalers(void)
-{
-	LL_RCC_SetSysPrescaler(sysclk_prescaler(CONFIG_CLOCK_STM32_D1CPRE));
-	LL_RCC_SetAHBPrescaler(ahb_prescaler(CONFIG_CLOCK_STM32_HPRE));
-	LL_RCC_SetAPB1Prescaler(apb1_prescaler(CONFIG_CLOCK_STM32_D2PPRE1));
-	LL_RCC_SetAPB2Prescaler(apb2_prescaler(CONFIG_CLOCK_STM32_D2PPRE2));
-	LL_RCC_SetAPB3Prescaler(apb3_prescaler(CONFIG_CLOCK_STM32_D1PPRE));
-	LL_RCC_SetAPB4Prescaler(apb4_prescaler(CONFIG_CLOCK_STM32_D3PPRE));
-}
-#endif /* CONFIG_CPU_CORTEX_M4 */
-
-static u32_t get_bus_clock(u32_t clock, u32_t prescaler)
+static uint32_t get_bus_clock(uint32_t clock, uint32_t prescaler)
 {
 	return clock / prescaler;
 }
@@ -65,12 +51,13 @@ static inline int stm32_clock_control_on(struct device *dev,
 					 clock_control_subsys_t sub_system)
 {
 	struct stm32_pclken *pclken = (struct stm32_pclken *)(sub_system);
+	int rc = 0;
 
 	ARG_UNUSED(dev);
 
 	/* Both cores can access bansk by following LL API */
 	/* Using "_Cn_" LL API would restrict access to one or the other */
-
+	z_stm32_hsem_lock(CFG_HW_RCC_SEMID, HSEM_LOCK_DEFAULT_RETRY);
 	switch (pclken->bus) {
 	case STM32_CLOCK_BUS_AHB1:
 		LL_AHB1_GRP1_EnableClock(pclken->enr);
@@ -100,22 +87,26 @@ static inline int stm32_clock_control_on(struct device *dev,
 		LL_APB4_GRP1_EnableClock(pclken->enr);
 		break;
 	default:
-		return -ENOTSUP;
+		rc = -ENOTSUP;
+		break;
 	}
 
-	return 0;
+	z_stm32_hsem_unlock(CFG_HW_RCC_SEMID);
+
+	return rc;
 }
 
 static inline int stm32_clock_control_off(struct device *dev,
 					  clock_control_subsys_t sub_system)
 {
 	struct stm32_pclken *pclken = (struct stm32_pclken *)(sub_system);
+	int rc = 0;
 
 	ARG_UNUSED(dev);
 
 	/* Both cores can access bansk by following LL API */
 	/* Using "_Cn_" LL API would restrict access to one or the other */
-
+	z_stm32_hsem_lock(CFG_HW_RCC_SEMID, HSEM_LOCK_DEFAULT_RETRY);
 	switch (pclken->bus) {
 	case STM32_CLOCK_BUS_AHB1:
 		LL_AHB1_GRP1_DisableClock(pclken->enr);
@@ -145,15 +136,17 @@ static inline int stm32_clock_control_off(struct device *dev,
 		LL_APB4_GRP1_DisableClock(pclken->enr);
 		break;
 	default:
-		return -ENOTSUP;
+		rc = -ENOTSUP;
+		break;
 	}
+	z_stm32_hsem_unlock(CFG_HW_RCC_SEMID);
 
-	return 0;
+	return rc;
 }
 
 static int stm32_clock_control_get_subsys_rate(struct device *clock,
 					clock_control_subsys_t sub_system,
-						u32_t *rate)
+						uint32_t *rate)
 {
 	struct stm32_pclken *pclken = (struct stm32_pclken *)(sub_system);
 	/*
@@ -162,17 +155,19 @@ static int stm32_clock_control_get_subsys_rate(struct device *clock,
 	 * since it will be updated after clock configuration and hence
 	 * more likely to contain actual clock speed
 	 */
-	u32_t sys_d1cpre_ck = get_bus_clock(SystemCoreClock,
-				CONFIG_CLOCK_STM32_D1CPRE);
-	u32_t ahb_clock = get_bus_clock(sys_d1cpre_ck,
+#if defined(CONFIG_CPU_CORTEX_M4)
+	uint32_t ahb_clock = SystemCoreClock;
+#else
+	uint32_t ahb_clock = get_bus_clock(SystemCoreClock,
 				CONFIG_CLOCK_STM32_HPRE);
-	u32_t apb1_clock = get_bus_clock(ahb_clock,
+#endif
+	uint32_t apb1_clock = get_bus_clock(ahb_clock,
 				CONFIG_CLOCK_STM32_D2PPRE1);
-	u32_t apb2_clock = get_bus_clock(ahb_clock,
+	uint32_t apb2_clock = get_bus_clock(ahb_clock,
 				CONFIG_CLOCK_STM32_D2PPRE2);
-	u32_t apb3_clock = get_bus_clock(ahb_clock,
+	uint32_t apb3_clock = get_bus_clock(ahb_clock,
 				CONFIG_CLOCK_STM32_D1PPRE);
-	u32_t apb4_clock = get_bus_clock(ahb_clock,
+	uint32_t apb4_clock = get_bus_clock(ahb_clock,
 				CONFIG_CLOCK_STM32_D3PPRE);
 
 	ARG_UNUSED(clock);
@@ -217,19 +212,19 @@ static int stm32_clock_control_init(struct device *dev)
 #if !defined(CONFIG_CPU_CORTEX_M4)
 
 #ifdef CONFIG_CLOCK_STM32_SYSCLK_SRC_PLL
-	/* Power Configuration */
-	LL_PWR_ConfigSupply(LL_PWR_DIRECT_SMPS_SUPPLY);
-	LL_PWR_SetRegulVoltageScaling(LL_PWR_REGU_VOLTAGE_SCALE1);
-	while (LL_PWR_IsActiveFlag_VOS() == 0) {
-	}
+
+	/* HW semaphore Clock enable */
+	LL_AHB4_GRP1_EnableClock(LL_AHB4_GRP1_PERIPH_HSEM);
+
+	z_stm32_hsem_lock(CFG_HW_RCC_SEMID, HSEM_LOCK_DEFAULT_RETRY);
 
 #ifdef CONFIG_CLOCK_STM32_PLL_SRC_HSE
 
-#ifdef CONFIG_CLOCK_STM32_HSE_BYPASS
-	LL_RCC_HSE_EnableBypass();
-#else
-	LL_RCC_HSE_DisableBypass();
-#endif /* CONFIG_CLOCK_STM32_HSE_BYPASS */
+	if (IS_ENABLED(CONFIG_CLOCK_STM32_HSE_BYPASS)) {
+		LL_RCC_HSE_EnableBypass();
+	} else {
+		LL_RCC_HSE_DisableBypass();
+	}
 
 	/* Enable HSE oscillator */
 	LL_RCC_HSE_Enable();
@@ -263,12 +258,19 @@ static int stm32_clock_control_init(struct device *dev)
 	}
 
 	/* Set buses (Sys,AHB, APB1, APB2 & APB4) prescalers */
-	config_bus_prescalers();
+	LL_RCC_SetSysPrescaler(sysclk_prescaler(CONFIG_CLOCK_STM32_D1CPRE));
+	LL_RCC_SetAHBPrescaler(ahb_prescaler(CONFIG_CLOCK_STM32_HPRE));
+	LL_RCC_SetAPB1Prescaler(apb1_prescaler(CONFIG_CLOCK_STM32_D2PPRE1));
+	LL_RCC_SetAPB2Prescaler(apb2_prescaler(CONFIG_CLOCK_STM32_D2PPRE2));
+	LL_RCC_SetAPB3Prescaler(apb3_prescaler(CONFIG_CLOCK_STM32_D1PPRE));
+	LL_RCC_SetAPB4Prescaler(apb4_prescaler(CONFIG_CLOCK_STM32_D3PPRE));
 
 	/* Set PLL1 as System Clock Source */
 	LL_RCC_SetSysClkSource(LL_RCC_SYS_CLKSOURCE_PLL1);
 	while (LL_RCC_GetSysClkSource() != LL_RCC_SYS_CLKSOURCE_STATUS_PLL1) {
 	}
+
+	z_stm32_hsem_unlock(CFG_HW_RCC_SEMID);
 
 #else
 	#error "CONFIG_CLOCK_STM32_SYSCLK_SRC_PLL not selected"

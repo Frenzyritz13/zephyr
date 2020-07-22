@@ -3,3 +3,6 @@
 
 config SOC_ESP32
 	bool "ESP32"
+	select XTENSA
+	select CLOCK_CONTROL
+	select CLOCK_CONTROL_ESP32

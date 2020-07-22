@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#define DT_DRV_COMPAT microchip_xec_i2c
+
 #include <drivers/clock_control.h>
 #include <kernel.h>
 #include <soc.h>
@@ -21,20 +23,20 @@
 #define MAX_CLK_STRETCHING  5
 
 struct xec_speed_cfg {
-	u32_t bus_clk;
-	u32_t data_timing;
-	u32_t start_hold_time;
-	u32_t config;
-	u32_t timeout_scale;
+	uint32_t bus_clk;
+	uint32_t data_timing;
+	uint32_t start_hold_time;
+	uint32_t config;
+	uint32_t timeout_scale;
 };
 
 struct i2c_xec_config {
-	u32_t port_sel;
-	u32_t base_addr;
+	uint32_t port_sel;
+	uint32_t base_addr;
 };
 
 struct i2c_xec_data {
-	u32_t pending_stop;
+	uint32_t pending_stop;
 };
 
 /* Recommended programming values based on 16MHz
@@ -84,7 +86,7 @@ static int xec_spin_yield(int *counter)
 	return 0;
 }
 
-static void recover_from_error(u32_t ba)
+static void recover_from_error(uint32_t ba)
 {
 	MCHP_I2C_SMB_CTRL_WO(ba) = MCHP_I2C_SMB_CTRL_PIN |
 				   MCHP_I2C_SMB_CTRL_ESO |
@@ -92,7 +94,7 @@ static void recover_from_error(u32_t ba)
 				   MCHP_I2C_SMB_CTRL_ACK;
 }
 
-static int wait_bus_free(u32_t ba)
+static int wait_bus_free(uint32_t ba)
 {
 	int ret;
 	int counter = 0;
@@ -108,7 +110,7 @@ static int wait_bus_free(u32_t ba)
 	return 0;
 }
 
-static int wait_completion(u32_t ba)
+static int wait_completion(uint32_t ba)
 {
 	int ret;
 	int counter = 0;
@@ -138,21 +140,21 @@ static int wait_completion(u32_t ba)
 	return 0;
 }
 
-static bool check_lines(u32_t ba)
+static bool check_lines(uint32_t ba)
 {
 	return ((!(MCHP_I2C_SMB_BB_CTRL(ba) & MCHP_I2C_SMB_BB_CLKI_RO)) ||
 		(!(MCHP_I2C_SMB_BB_CTRL(ba) & MCHP_I2C_SMB_BB_DATI_RO)));
 }
 
-static int i2c_xec_configure(struct device *dev, u32_t dev_config_raw)
+static int i2c_xec_configure(struct device *dev, uint32_t dev_config_raw)
 {
 	const struct i2c_xec_config *config =
-		(const struct i2c_xec_config *const) (dev->config->config_info);
-	u32_t ba = config->base_addr;
-	u8_t port_sel = config->port_sel;
-	u32_t speed_id;
-	u32_t cfg, bb_ctrl;
-	u8_t ctrl;
+		(const struct i2c_xec_config *const) (dev->config_info);
+	uint32_t ba = config->base_addr;
+	uint8_t port_sel = config->port_sel;
+	uint32_t speed_id;
+	uint32_t cfg, bb_ctrl;
+	uint8_t ctrl;
 
 	if (!(dev_config_raw & I2C_MODE_MASTER)) {
 		return -ENOTSUP;
@@ -224,13 +226,13 @@ static int i2c_xec_configure(struct device *dev, u32_t dev_config_raw)
 }
 
 static int i2c_xec_poll_write(struct device *dev, struct i2c_msg msg,
-			      u16_t addr)
+			      uint16_t addr)
 {
 	const struct i2c_xec_config *config =
-		(const struct i2c_xec_config *const) (dev->config->config_info);
+		(const struct i2c_xec_config *const) (dev->config_info);
 	struct i2c_xec_data *data =
 		(struct i2c_xec_data *const) (dev->driver_data);
-	u32_t ba = config->base_addr;
+	uint32_t ba = config->base_addr;
 	int ret;
 
 	if (data->pending_stop == 0) {
@@ -287,14 +289,14 @@ static int i2c_xec_poll_write(struct device *dev, struct i2c_msg msg,
 }
 
 static int i2c_xec_poll_read(struct device *dev, struct i2c_msg msg,
-			     u16_t addr)
+			     uint16_t addr)
 {
 	const struct i2c_xec_config *config =
-		(const struct i2c_xec_config *const) (dev->config->config_info);
+		(const struct i2c_xec_config *const) (dev->config_info);
 	struct i2c_xec_data *data =
 		(struct i2c_xec_data *const) (dev->driver_data);
-	u32_t ba = config->base_addr;
-	u8_t byte, ctrl;
+	uint32_t ba = config->base_addr;
+	uint8_t byte, ctrl;
 	int ret;
 
 	if (!(msg.flags & I2C_MSG_RESTART)) {
@@ -310,10 +312,14 @@ static int i2c_xec_poll_read(struct device *dev, struct i2c_msg msg,
 		}
 	}
 
-	/* Send slave address */
-	MCHP_I2C_SMB_DATA(ba) = (addr | BIT(0));
+	/* MCHP I2C spec recommends that for repeated start to write to control
+	 * register before writing to data register
+	 */
 	MCHP_I2C_SMB_CTRL_WO(ba) = MCHP_I2C_SMB_CTRL_ESO |
 		MCHP_I2C_SMB_CTRL_STA | MCHP_I2C_SMB_CTRL_ACK;
+
+	/* Send slave address */
+	MCHP_I2C_SMB_DATA(ba) = (addr | BIT(0));
 
 	ret = wait_completion(ba);
 	if (ret) {
@@ -322,7 +328,7 @@ static int i2c_xec_poll_read(struct device *dev, struct i2c_msg msg,
 
 	if (msg.len == 1) {
 		/* Send NACK for last transaction */
-		MCHP_I2C_SMB_CTRL_WO(ba) = MCHP_I2C_SMB_CTRL_STA;
+		MCHP_I2C_SMB_CTRL_WO(ba) = MCHP_I2C_SMB_CTRL_ESO;
 	}
 
 	/* Read dummy byte */
@@ -351,7 +357,7 @@ static int i2c_xec_poll_read(struct device *dev, struct i2c_msg msg,
 			}
 		} else if (i == (msg.len - 2)) {
 			/* Send NACK for last transaction */
-			MCHP_I2C_SMB_CTRL_WO(ba) = MCHP_I2C_SMB_CTRL_STA;
+			MCHP_I2C_SMB_CTRL_WO(ba) = MCHP_I2C_SMB_CTRL_ESO;
 		}
 		msg.buf[i] = MCHP_I2C_SMB_DATA(ba);
 	}
@@ -360,7 +366,7 @@ static int i2c_xec_poll_read(struct device *dev, struct i2c_msg msg,
 }
 
 static int i2c_xec_transfer(struct device *dev, struct i2c_msg *msgs,
-				u8_t num_msgs, u16_t addr)
+				uint8_t num_msgs, uint16_t addr)
 {
 	int ret = 0;
 
@@ -402,42 +408,6 @@ static const struct i2c_driver_api i2c_xec_driver_api = {
 #endif
 };
 
-#ifdef CONFIG_I2C_XEC_0
-static struct i2c_xec_data i2c_xec_data_0;
-static const struct i2c_xec_config i2c_xec_config_0 = {
-	.base_addr = DT_INST_0_MICROCHIP_XEC_I2C_BASE_ADDRESS,
-	.port_sel = DT_INST_0_MICROCHIP_XEC_I2C_PORT_SEL,
-};
-DEVICE_AND_API_INIT(i2c_xec_0, DT_INST_0_MICROCHIP_XEC_I2C_LABEL,
-			&i2c_xec_init, &i2c_xec_data_0, &i2c_xec_config_0,
-			POST_KERNEL, CONFIG_I2C_INIT_PRIORITY,
-			&i2c_xec_driver_api);
-#endif /* CONFIG_I2C_XEC_0 */
-
-#ifdef CONFIG_I2C_XEC_1
-static struct i2c_xec_data i2c_xec_data_1;
-static const struct i2c_xec_config i2c_xec_config_1 = {
-	.base_addr	= DT_INST_1_MICROCHIP_XEC_I2C_BASE_ADDRESS,
-	.port_sel = DT_INST_1_MICROCHIP_XEC_I2C_PORT_SEL,
-};
-DEVICE_AND_API_INIT(i2c_xec_1, DT_INST_1_MICROCHIP_XEC_I2C_LABEL,
-			&i2c_xec_init, &i2c_xec_data_1, &i2c_xec_config_1,
-			POST_KERNEL, CONFIG_I2C_INIT_PRIORITY,
-			&i2c_xec_driver_api);
-#endif /* CONFIG_I2C_XEC_1 */
-
-#ifdef CONFIG_I2C_XEC_2
-static struct i2c_xec_data i2c_xec_data_2;
-static const struct i2c_xec_config i2c_xec_config_2 = {
-	.base_addr	= DT_INST_2_MICROCHIP_XEC_I2C_BASE_ADDRESS,
-	.port_sel = DT_INST_2_MICROCHIP_XEC_I2C_PORT_SEL,
-};
-DEVICE_AND_API_INIT(i2c_xec_2, DT_INST_2_MICROCHIP_XEC_I2C_LABEL,
-			&i2c_xec_init, &i2c_xec_data_2, &i2c_xec_config_2,
-			POST_KERNEL, CONFIG_I2C_INIT_PRIORITY,
-			&i2c_xec_driver_api);
-#endif /* CONFIG_I2C_XEC_2 */
-
 static int i2c_xec_init(struct device *dev)
 {
 	struct i2c_xec_data *data =
@@ -445,3 +415,18 @@ static int i2c_xec_init(struct device *dev)
 	data->pending_stop = 0;
 	return 0;
 }
+
+#define I2C_XEC_DEVICE(n)						\
+	static struct i2c_xec_data i2c_xec_data_##n;			\
+	static const struct i2c_xec_config i2c_xec_config_##n = {	\
+		.base_addr =						\
+			DT_INST_REG_ADDR(n),	\
+		.port_sel = DT_INST_PROP(n, port_sel),	\
+	};								\
+	DEVICE_AND_API_INIT(i2c_xec_##n,				\
+		DT_INST_LABEL(n),			\
+		&i2c_xec_init, &i2c_xec_data_##n, &i2c_xec_config_##n,	\
+		POST_KERNEL, CONFIG_I2C_INIT_PRIORITY,			\
+		&i2c_xec_driver_api);
+
+DT_INST_FOREACH_STATUS_OKAY(I2C_XEC_DEVICE)

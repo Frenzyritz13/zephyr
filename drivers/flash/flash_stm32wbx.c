@@ -24,7 +24,7 @@ LOG_MODULE_REGISTER(LOG_DOMAIN);
 /* offset and len must be aligned on 8 for write,
  * positive and not beyond end of flash
  */
-bool flash_stm32_valid_range(struct device *dev, off_t offset, u32_t len,
+bool flash_stm32_valid_range(struct device *dev, off_t offset, uint32_t len,
 			     bool write)
 {
 	return (!write || (offset % 8 == 0 && len % 8 == 0U)) &&
@@ -34,21 +34,21 @@ bool flash_stm32_valid_range(struct device *dev, off_t offset, u32_t len,
 /*
  * Up to 255 4K pages
  */
-static u32_t get_page(off_t offset)
+static uint32_t get_page(off_t offset)
 {
 	return offset >> STM32WBX_PAGE_SHIFT;
 }
 
-static int write_dword(struct device *dev, off_t offset, u64_t val)
+static int write_dword(struct device *dev, off_t offset, uint64_t val)
 {
-	volatile u32_t *flash = (u32_t *)(offset + CONFIG_FLASH_BASE_ADDRESS);
-	struct stm32wbx_flash *regs = FLASH_STM32_REGS(dev);
-	u32_t tmp;
+	volatile uint32_t *flash = (uint32_t *)(offset + CONFIG_FLASH_BASE_ADDRESS);
+	FLASH_TypeDef *regs = FLASH_STM32_REGS(dev);
+	uint32_t tmp;
 	int ret, rc;
 
 	/* if the control register is locked, do not fail silently */
-	if (regs->cr & FLASH_CR_LOCK) {
-		rc = -EIO;
+	if (regs->CR & FLASH_CR_LOCK) {
+		return -EIO;
 	}
 
 	/* Check if this double word is erased */
@@ -63,31 +63,31 @@ static int write_dword(struct device *dev, off_t offset, u64_t val)
 	}
 
 	/* Set the PG bit */
-	regs->cr |= FLASH_CR_PG;
+	regs->CR |= FLASH_CR_PG;
 
 	/* Flush the register write */
-	tmp = regs->cr;
+	tmp = regs->CR;
 
 	/* Perform the data write operation at the desired memory address */
-	flash[0] = (u32_t)val;
-	flash[1] = (u32_t)(val >> 32);
+	flash[0] = (uint32_t)val;
+	flash[1] = (uint32_t)(val >> 32);
 
 	/* Wait until the BSY bit is cleared */
 	rc = flash_stm32_wait_flash_idle(dev);
 
 	/* Clear the PG bit */
-	regs->cr &= (~FLASH_CR_PG);
+	regs->CR &= (~FLASH_CR_PG);
 
-	return 0;
+	return rc;
 }
 
-static int erase_page(struct device *dev, u32_t page)
+static int erase_page(struct device *dev, uint32_t page)
 {
-	struct stm32wbx_flash *regs = FLASH_STM32_REGS(dev);
+	FLASH_TypeDef *regs = FLASH_STM32_REGS(dev);
 	int rc;
 
 	/* if the control register is locked, do not fail silently */
-	if (regs->cr & FLASH_CR_LOCK) {
+	if (regs->CR & FLASH_CR_LOCK) {
 		return -EIO;
 	}
 
@@ -98,21 +98,21 @@ static int erase_page(struct device *dev, u32_t page)
 	}
 
 	/* Check erase operation allowed */
-	if (regs->cr & FLASH_SR_PESD) {
+	if (regs->CR & FLASH_SR_PESD) {
 		return -EBUSY;
 	}
 
 	/* Proceed to erase the page */
-	regs->cr |= FLASH_CR_PER;
-	regs->cr &= ~FLASH_CR_PNB_Msk;
-	regs->cr |= page << FLASH_CR_PNB_Pos;
+	regs->CR |= FLASH_CR_PER;
+	regs->CR &= ~FLASH_CR_PNB_Msk;
+	regs->CR |= page << FLASH_CR_PNB_Pos;
 
-	regs->cr |= FLASH_CR_STRT;
+	regs->CR |= FLASH_CR_STRT;
 
 	/* Wait for the BSY bit */
 	rc = flash_stm32_wait_flash_idle(dev);
 
-	regs->cr &= (~FLASH_TYPEERASE_PAGES);
+	regs->CR &= ~FLASH_CR_PER;
 
 	return rc;
 }
@@ -140,7 +140,7 @@ int flash_stm32_write_range(struct device *dev, unsigned int offset,
 
 	for (i = 0; i < len; i += 8, offset += 8U) {
 		rc = write_dword(dev, offset,
-				UNALIGNED_GET((const u64_t *) data + (i >> 3)));
+				UNALIGNED_GET((const uint64_t *) data + (i >> 3)));
 		if (rc < 0) {
 			return rc;
 		}
@@ -171,16 +171,16 @@ void flash_stm32_page_layout(struct device *dev,
 
 int flash_stm32_check_status(struct device *dev)
 {
-	struct stm32wbx_flash *regs = FLASH_STM32_REGS(dev);
-	u32_t error = 0;
+	FLASH_TypeDef *regs = FLASH_STM32_REGS(dev);
+	uint32_t error = 0;
 
 	/* Save Flash errors */
-	error = (regs->sr & FLASH_FLAG_SR_ERROR);
-	error |= (regs->eccr & FLASH_FLAG_ECCC);
+	error = (regs->SR & FLASH_FLAG_SR_ERRORS);
+	error |= (regs->ECCR & FLASH_FLAG_ECCC);
 
 	/* Clear systematic Option and Enginneering bits validity error */
 	if (error & FLASH_FLAG_OPTVERR) {
-		regs->sr |= FLASH_FLAG_SR_ERROR;
+		regs->SR |= FLASH_FLAG_SR_ERRORS;
 		return 0;
 	}
 

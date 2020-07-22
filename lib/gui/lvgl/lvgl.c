@@ -11,6 +11,9 @@
 #ifdef CONFIG_LVGL_FILESYSTEM
 #include "lvgl_fs.h"
 #endif
+#ifdef CONFIG_LVGL_POINTER_KSCAN
+#include <drivers/kscan.h>
+#endif
 #include LV_MEM_CUSTOM_INCLUDE
 
 #define LOG_LEVEL CONFIG_LVGL_LOG_LEVEL
@@ -26,9 +29,9 @@ static lv_disp_buf_t disp_buf;
 
 #define NBR_PIXELS_IN_BUFFER (BUFFER_SIZE * 8 / CONFIG_LVGL_BITS_PER_PIXEL)
 
-static u8_t buf0[BUFFER_SIZE];
+static uint8_t buf0[BUFFER_SIZE];
 #ifdef CONFIG_LVGL_DOUBLE_VDB
-static u8_t buf1[BUFFER_SIZE];
+static uint8_t buf1[BUFFER_SIZE];
 #endif
 
 #endif /* CONFIG_LVGL_BUFFER_ALLOC_STATIC */
@@ -53,7 +56,7 @@ static void lvgl_log(lv_log_level_t level, const char *file, uint32_t line,
 	 * * LOG_LEVEL_INF 3
 	 * * LOG_LEVEL_DBG 4
 	 */
-	u8_t zephyr_level = LOG_LEVEL_DBG - level;
+	uint8_t zephyr_level = LOG_LEVEL_DBG - level;
 
 	ARG_UNUSED(file);
 	ARG_UNUSED(line);
@@ -66,6 +69,26 @@ static void lvgl_log(lv_log_level_t level, const char *file, uint32_t line,
 
 static int lvgl_allocate_rendering_buffers(lv_disp_drv_t *disp_drv)
 {
+	struct display_capabilities cap;
+	struct device *display_dev = (struct device *)disp_drv->user_data;
+	int err = 0;
+
+	display_get_capabilities(display_dev, &cap);
+
+	if (cap.x_resolution <= CONFIG_LVGL_HOR_RES) {
+		disp_drv->hor_res = cap.x_resolution;
+	} else {
+		LOG_ERR("Horizontal resolution is larger than maximum");
+		err = -ENOTSUP;
+	}
+
+	if (cap.y_resolution <= CONFIG_LVGL_VER_RES) {
+		disp_drv->ver_res = cap.y_resolution;
+	} else {
+		LOG_ERR("Vertical resolution is larger than maximum");
+		err = -ENOTSUP;
+	}
+
 	disp_drv->buffer = &disp_buf;
 #ifdef CONFIG_LVGL_DOUBLE_VDB
 	lv_disp_buf_init(disp_drv->buffer, &buf0, &buf1, NBR_PIXELS_IN_BUFFER);
@@ -73,7 +96,7 @@ static int lvgl_allocate_rendering_buffers(lv_disp_drv_t *disp_drv)
 	lv_disp_buf_init(disp_drv->buffer, &buf0, NULL, NBR_PIXELS_IN_BUFFER);
 #endif /* CONFIG_LVGL_DOUBLE_VDB  */
 
-	return 0;
+	return err;
 }
 
 #else
@@ -82,8 +105,8 @@ static int lvgl_allocate_rendering_buffers(lv_disp_drv_t *disp_drv)
 {
 	void *buf0 = NULL;
 	void *buf1 = NULL;
-	u16_t buf_nbr_pixels;
-	u32_t buf_size;
+	uint16_t buf_nbr_pixels;
+	uint32_t buf_size;
 	struct display_capabilities cap;
 	struct device *display_dev = (struct device *)disp_drv->user_data;
 
@@ -146,12 +169,82 @@ static int lvgl_allocate_rendering_buffers(lv_disp_drv_t *disp_drv)
 }
 #endif /* CONFIG_LVGL_BUFFER_ALLOC_STATIC */
 
+#ifdef CONFIG_LVGL_POINTER_KSCAN
+K_MSGQ_DEFINE(kscan_msgq, sizeof(lv_indev_data_t),
+	      CONFIG_LVGL_POINTER_KSCAN_MSGQ_COUNT, 4);
+
+static void lvgl_pointer_kscan_callback(struct device *dev, uint32_t row,
+					uint32_t col, bool pressed)
+{
+	lv_indev_data_t data = {
+		.point.x = col,
+		.point.y = row,
+		.state = pressed ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL,
+	};
+
+	if (k_msgq_put(&kscan_msgq, &data, K_NO_WAIT) != 0) {
+		LOG_ERR("Could put input data into queue");
+	}
+}
+
+static bool lvgl_pointer_kscan_read(lv_indev_drv_t *drv, lv_indev_data_t *data)
+{
+	static lv_indev_data_t prev = {
+		.point.x = 0,
+		.point.y = 0,
+		.state = LV_INDEV_STATE_REL,
+	};
+
+	lv_indev_data_t curr;
+
+	if (k_msgq_get(&kscan_msgq, &curr, K_NO_WAIT) == 0) {
+		prev = curr;
+	}
+
+	*data = prev;
+
+	return k_msgq_num_used_get(&kscan_msgq) > 0;
+}
+
+static int lvgl_pointer_kscan_init(void)
+{
+	struct device *kscan_dev =
+		device_get_binding(CONFIG_LVGL_POINTER_KSCAN_DEV_NAME);
+
+	lv_indev_drv_t indev_drv;
+
+	if (kscan_dev == NULL) {
+		LOG_ERR("Keyboard scan device not found.");
+		return -ENODEV;
+	}
+
+	if (kscan_config(kscan_dev, lvgl_pointer_kscan_callback) < 0) {
+		LOG_ERR("Could not configure keyboard scan device.");
+		return -ENODEV;
+	}
+
+	lv_indev_drv_init(&indev_drv);
+	indev_drv.type = LV_INDEV_TYPE_POINTER;
+	indev_drv.read_cb = lvgl_pointer_kscan_read;
+
+	if (lv_indev_drv_register(&indev_drv) == NULL) {
+		LOG_ERR("Failed to register input device.");
+		return -EPERM;
+	}
+
+	kscan_enable_callback(kscan_dev);
+
+	return 0;
+}
+#endif /* CONFIG_LVGL_POINTER_KSCAN */
+
 static int lvgl_init(struct device *dev)
 {
 	ARG_UNUSED(dev);
 
 	struct device *display_dev =
 		device_get_binding(CONFIG_LVGL_DISPLAY_DEV_NAME);
+	int err = 0;
 	lv_disp_drv_t disp_drv;
 
 	if (display_dev == NULL) {
@@ -172,7 +265,10 @@ static int lvgl_init(struct device *dev)
 	lv_disp_drv_init(&disp_drv);
 	disp_drv.user_data = (void *) display_dev;
 
-	lvgl_allocate_rendering_buffers(&disp_drv);
+	err = lvgl_allocate_rendering_buffers(&disp_drv);
+	if (err != 0) {
+		return err;
+	}
 
 	if (set_lvgl_rendering_cb(&disp_drv) != 0) {
 		LOG_ERR("Display not supported.");
@@ -183,6 +279,10 @@ static int lvgl_init(struct device *dev)
 		LOG_ERR("Failed to register display device.");
 		return -EPERM;
 	}
+
+#ifdef CONFIG_LVGL_POINTER_KSCAN
+	lvgl_pointer_kscan_init();
+#endif /* CONFIG_LVGL_POINTER_KSCAN */
 
 	return 0;
 }

@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <kernel_structs.h>
+#include <kernel.h>
 #include <cmsis_os.h>
+#include <string.h>
 
 K_MEM_SLAB_DEFINE(cmsis_mutex_slab, sizeof(struct k_mutex),
 		CONFIG_CMSIS_MUTEX_MAX_COUNT, 4);
@@ -57,7 +58,7 @@ osStatus osMutexWait(osMutexId mutex_id, uint32_t timeout)
 	} else if (timeout == 0U) {
 		status = k_mutex_lock(mutex, K_NO_WAIT);
 	} else {
-		status = k_mutex_lock(mutex, timeout);
+		status = k_mutex_lock(mutex, K_MSEC(timeout));
 	}
 
 	if (status == -EBUSY) {

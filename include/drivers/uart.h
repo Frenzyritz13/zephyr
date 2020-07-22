@@ -31,6 +31,7 @@ extern "C" {
 
 /** @brief Line control signals. */
 enum uart_line_ctrl {
+	UART_LINE_CTRL_BAUD_RATE = BIT(0),
 	UART_LINE_CTRL_RTS = BIT(1),
 	UART_LINE_CTRL_DTR = BIT(2),
 	UART_LINE_CTRL_DCD = BIT(3),
@@ -63,14 +64,15 @@ enum uart_line_ctrl {
  *    UART_RX_DISABLED event is generated. After that whole process can be
  *    repeated.
  *
- * Any time during reception UART_RX_STOPPED event can occur. It will be
- * followed by UART_RX_BUF_RELEASED event for every buffer currently passed to
- * driver and finally by UART_RX_DISABLED event.
+ * Any time during reception UART_RX_STOPPED event can occur. if there is any
+ * data received, UART_RX_RDY event will be generated. It will be followed by
+ * UART_RX_BUF_RELEASED event for every buffer currently passed to driver and
+ * finally by UART_RX_DISABLED event.
  *
  * Receiving can be disabled using uart_rx_disable, after calling that
- * function any data received will be lost, UART_RX_BUF_RELEASED event will be
- * generated for every buffer currently passed to driver and UART_RX_DISABLED
- * event will occur.
+ * function, if there is any data received, UART_RX_RDY event will be generated.
+ * UART_RX_BUF_RELEASED event will be generated for every buffer currently
+ * passed to driver and finally UART_RX_DISABLED event will occur.
  *
  * Transmitting:
  * 1. Transmitting starts by uart_tx function.
@@ -95,10 +97,12 @@ enum uart_event_type {
 	/**
 	 * @brief Received data is ready for processing.
 	 *
-	 * This event is generated in two cases:
+	 * This event is generated in the following cases:
 	 * - When RX timeout occurred, and data was stored in provided buffer.
 	 *   This can happen multiple times in the same buffer.
 	 * - When provided buffer is full.
+	 * - After uart_rx_disable().
+	 * - After stopping due to external event (UART_RX_STOPPED).
 	 */
 	UART_RX_RDY,
 	/**
@@ -157,19 +161,20 @@ enum uart_rx_stop_reason {
 	UART_BREAK = (1 << 3),
 };
 
+
 /** @brief Backward compatibility defines, deprecated */
-#define UART_ERROR_BREAK UART_BREAK
-#define LINE_CTRL_BAUD_RATE (1 << 0)
-#define LINE_CTRL_RTS UART_LINE_CTRL_RTS
-#define LINE_CTRL_DTR UART_LINE_CTRL_DTR
-#define LINE_CTRL_DCD UART_LINE_CTRL_DCD
-#define LINE_CTRL_DSR UART_LINE_CTRL_DSR
+#define UART_ERROR_BREAK __DEPRECATED_MACRO UART_BREAK
+#define LINE_CTRL_BAUD_RATE __DEPRECATED_MACRO UART_LINE_CTRL_BAUD_RATE
+#define LINE_CTRL_RTS __DEPRECATED_MACRO UART_LINE_CTRL_RTS
+#define LINE_CTRL_DTR __DEPRECATED_MACRO UART_LINE_CTRL_DTR
+#define LINE_CTRL_DCD __DEPRECATED_MACRO UART_LINE_CTRL_DCD
+#define LINE_CTRL_DSR __DEPRECATED_MACRO UART_LINE_CTRL_DSR
 
 
 /** @brief UART TX event data. */
 struct uart_event_tx {
 	/** @brief Pointer to current buffer. */
-	const u8_t *buf;
+	const uint8_t *buf;
 	/** @brief Number of bytes sent. */
 	size_t len;
 };
@@ -182,7 +187,7 @@ struct uart_event_tx {
  */
 struct uart_event_rx {
 	/** @brief Pointer to current buffer. */
-	u8_t *buf;
+	uint8_t *buf;
 	/** @brief Currently received data offset in bytes. */
 	size_t offset;
 	/** @brief Number of new bytes received. */
@@ -192,7 +197,7 @@ struct uart_event_rx {
 /** @brief UART RX buffer released event data. */
 struct uart_event_rx_buf {
 	/* @brief Pointer to buffer that is no longer in use. */
-	u8_t *buf;
+	uint8_t *buf;
 };
 
 /** @brief UART RX stopped data. */
@@ -208,7 +213,7 @@ struct uart_event {
 	/** @brief Type of event */
 	enum uart_event_type type;
 	/** @brief Event data */
-	union {
+	union uart_event_data {
 		/** @brief UART_TX_DONE and UART_TX_ABORTED events data. */
 		struct uart_event_tx tx;
 		/** @brief UART_RX_RDY event data. */
@@ -231,11 +236,6 @@ struct uart_event {
 typedef void (*uart_callback_t)(struct uart_event *evt, void *user_data);
 
 /**
- * @brief Options for @a UART initialization.
- */
-#define UART_OPTION_AFCE 0x01
-
-/**
  * @brief UART controller configuration structure
  *
  * @param baudrate  Baudrate setting in bps
@@ -245,11 +245,11 @@ typedef void (*uart_callback_t)(struct uart_event *evt, void *user_data);
  * @param flow_ctrl Flow control setting, use @ref uart_config_flow_control
  */
 struct uart_config {
-	u32_t baudrate;
-	u8_t parity;
-	u8_t stop_bits;
-	u8_t data_bits;
-	u8_t flow_ctrl;
+	uint32_t baudrate;
+	uint8_t parity;
+	uint8_t stop_bits;
+	uint8_t data_bits;
+	uint8_t flow_ctrl;
 };
 
 /** @brief Parity modes */
@@ -327,12 +327,12 @@ typedef void (*uart_irq_config_func_t)(struct device *port);
  */
 struct uart_device_config {
 	union {
-		u32_t port;
-		u8_t *base;
-		u32_t regs;
+		uint32_t port;
+		uint8_t *base;
+		uint32_t regs;
 	};
 
-	u32_t sys_clk_freq;
+	uint32_t sys_clk_freq;
 
 #if defined(CONFIG_UART_INTERRUPT_DRIVEN) || defined(CONFIG_UART_ASYNC_API)
 	uart_irq_config_func_t	irq_config_func;
@@ -340,20 +340,20 @@ struct uart_device_config {
 };
 
 /** @brief Driver API structure. */
-struct uart_driver_api {
+__subsystem struct uart_driver_api {
 
 #ifdef CONFIG_UART_ASYNC_API
 
 	int (*callback_set)(struct device *dev, uart_callback_t callback,
 			    void *user_data);
 
-	int (*tx)(struct device *dev, const u8_t *buf, size_t len,
-		  u32_t timeout);
+	int (*tx)(struct device *dev, const uint8_t *buf, size_t len,
+		  int32_t timeout);
 	int (*tx_abort)(struct device *dev);
 
-	int (*rx_enable)(struct device *dev, u8_t *buf, size_t len,
-			 u32_t timeout);
-	int (*rx_buf_rsp)(struct device *dev, u8_t *buf, size_t len);
+	int (*rx_enable)(struct device *dev, uint8_t *buf, size_t len,
+			 int32_t timeout);
+	int (*rx_buf_rsp)(struct device *dev, uint8_t *buf, size_t len);
 	int (*rx_disable)(struct device *dev);
 
 #endif
@@ -372,10 +372,10 @@ struct uart_driver_api {
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
 
 	/** Interrupt driven FIFO fill function */
-	int (*fifo_fill)(struct device *dev, const u8_t *tx_data, int len);
+	int (*fifo_fill)(struct device *dev, const uint8_t *tx_data, int len);
 
 	/** Interrupt driven FIFO read function */
-	int (*fifo_read)(struct device *dev, u8_t *rx_data, const int size);
+	int (*fifo_read)(struct device *dev, uint8_t *rx_data, const int size);
 
 	/** Interrupt driven transfer enabling function */
 	void (*irq_tx_enable)(struct device *dev);
@@ -418,17 +418,16 @@ struct uart_driver_api {
 #endif
 
 #ifdef CONFIG_UART_LINE_CTRL
-	int (*line_ctrl_set)(struct device *dev, u32_t ctrl, u32_t val);
-	int (*line_ctrl_get)(struct device *dev, u32_t ctrl, u32_t *val);
+	int (*line_ctrl_set)(struct device *dev, uint32_t ctrl, uint32_t val);
+	int (*line_ctrl_get)(struct device *dev, uint32_t ctrl, uint32_t *val);
 #endif
 
 #ifdef CONFIG_UART_DRV_CMD
-	int (*drv_cmd)(struct device *dev, u32_t cmd, u32_t p);
+	int (*drv_cmd)(struct device *dev, uint32_t cmd, uint32_t p);
 #endif
 
 };
 
-#ifdef CONFIG_UART_ASYNC_API
 
 /**
  * @brief Set event handler function.
@@ -437,16 +436,21 @@ struct uart_driver_api {
  * @param callback  Event handler.
  * @param user_data Data to pass to event handler function.
  *
+ * @retval -ENOTSUP If not supported.
  * @retval 0	    If successful, negative errno code otherwise.
  */
 static inline int uart_callback_set(struct device *dev,
 				    uart_callback_t callback,
 				    void *user_data)
 {
+#ifdef CONFIG_UART_ASYNC_API
 	const struct uart_driver_api *api =
 			(const struct uart_driver_api *)dev->driver_api;
 
 	return api->callback_set(dev, callback, user_data);
+#else
+	return -ENOTSUP;
+#endif
 }
 
 /**
@@ -458,21 +462,28 @@ static inline int uart_callback_set(struct device *dev,
  * @param dev     UART device structure.
  * @param buf     Pointer to transmit buffer.
  * @param len     Length of transmit buffer.
- * @param timeout Timeout in milliseconds. Valid only if flow control is enabled
+ * @param timeout Timeout in milliseconds. Valid only if flow control is
+ *		  enabled. @ref SYS_FOREVER_MS disables timeout.
  *
- * @retval -EBUSY There is already an ongoing transfer.
- * @retval 0	  If successful, negative errno code otherwise.
+ * @retval -ENOTSUP If not supported.
+ * @retval -EBUSY   There is already an ongoing transfer.
+ * @retval 0	    If successful, negative errno code otherwise.
  */
-static inline int uart_tx(struct device *dev,
-			  const u8_t *buf,
-			  size_t len,
-			  u32_t timeout)
+__syscall int uart_tx(struct device *dev, const uint8_t *buf, size_t len,
+		      int32_t timeout);
+
+static inline int z_impl_uart_tx(struct device *dev, const uint8_t *buf,
+				 size_t len, int32_t timeout)
 
 {
+#ifdef CONFIG_UART_ASYNC_API
 	const struct uart_driver_api *api =
 			(const struct uart_driver_api *)dev->driver_api;
 
 	return api->tx(dev, buf, len, timeout);
+#else
+	return -ENOTSUP;
+#endif
 }
 
 /**
@@ -482,15 +493,22 @@ static inline int uart_tx(struct device *dev,
  *
  * @param dev UART device structure.
  *
- * @retval -EFAULT There is no active transmission.
- * @retval 0	   If successful, negative errno code otherwise.
+ * @retval -ENOTSUP If not supported.
+ * @retval -EFAULT  There is no active transmission.
+ * @retval 0	    If successful, negative errno code otherwise.
  */
-static inline int uart_tx_abort(struct device *dev)
+__syscall int uart_tx_abort(struct device *dev);
+
+static inline int z_impl_uart_tx_abort(struct device *dev)
 {
+#ifdef CONFIG_UART_ASYNC_API
 	const struct uart_driver_api *api =
 			(const struct uart_driver_api *)dev->driver_api;
 
 	return api->tx_abort(dev);
+#else
+	return -ENOTSUP;
+#endif
 }
 
 /**
@@ -503,19 +521,27 @@ static inline int uart_tx_abort(struct device *dev)
  * @param dev     UART device structure.
  * @param buf     Pointer to receive buffer.
  * @param len     Buffer length.
- * @param timeout Timeout in milliseconds.
+ * @param timeout Timeout in milliseconds. @ref SYS_FOREVER_MS disables timeout.
  *
- * @retval -EBUSY RX already in progress.
- * @retval 0	  If successful, negative errno code otherwise.
+ * @retval -ENOTSUP If not supported.
+ * @retval -EBUSY   RX already in progress.
+ * @retval 0	    If successful, negative errno code otherwise.
  *
  */
-static inline int uart_rx_enable(struct device *dev, u8_t *buf, size_t len,
-				 u32_t timeout)
+__syscall int uart_rx_enable(struct device *dev, uint8_t *buf, size_t len,
+			     int32_t timeout);
+
+static inline int z_impl_uart_rx_enable(struct device *dev, uint8_t *buf,
+					size_t len, int32_t timeout)
 {
+#ifdef CONFIG_UART_ASYNC_API
 	const struct uart_driver_api *api =
 				(const struct uart_driver_api *)dev->driver_api;
 
 	return api->rx_enable(dev, buf, len, timeout);
+#else
+	return -ENOTSUP;
+#endif
 }
 
 /**
@@ -532,38 +558,50 @@ static inline int uart_rx_enable(struct device *dev, u8_t *buf, size_t len,
  * @param buf Pointer to receive buffer.
  * @param len Buffer length.
  *
- * @retval -EBUSY Next buffer already set.
- * @retval 0	  If successful, negative errno code otherwise.
+ * @retval -ENOTSUP If not supported.
+ * @retval -EBUSY   Next buffer already set.
+ * @retval 0	    If successful, negative errno code otherwise.
  *
  */
-static inline int uart_rx_buf_rsp(struct device *dev, u8_t *buf, size_t len)
+static inline int uart_rx_buf_rsp(struct device *dev, uint8_t *buf, size_t len)
 {
+#ifdef CONFIG_UART_ASYNC_API
 	const struct uart_driver_api *api =
 				(const struct uart_driver_api *)dev->driver_api;
 
 	return api->rx_buf_rsp(dev, buf, len);
+#else
+	return -ENOTSUP;
+#endif
 }
 
 /**
  * @brief Disable RX
  *
  * UART_RX_BUF_RELEASED event will be generated for every buffer scheduled,
- * after that UART_RX_DISABLED event will be generated.
+ * after that UART_RX_DISABLED event will be generated. Additionally, if there
+ * is any pending received data, the UART_RX_RDY event for that data will be
+ * generated before the UART_RX_BUF_RELEASED events.
  *
  * @param dev UART device structure.
  *
- * @retval -EFAULT There is no active reception.
- * @retval 0	   If successful, negative errno code otherwise.
+ * @retval -ENOTSUP If not supported.
+ * @retval -EFAULT  There is no active reception.
+ * @retval 0	    If successful, negative errno code otherwise.
  */
-static inline int uart_rx_disable(struct device *dev)
+__syscall int uart_rx_disable(struct device *dev);
+
+static inline int z_impl_uart_rx_disable(struct device *dev)
 {
+#ifdef CONFIG_UART_ASYNC_API
 	const struct uart_driver_api *api =
 			(const struct uart_driver_api *)dev->driver_api;
 
 	return api->rx_disable(dev);
-}
-
+#else
+	return -ENOTSUP;
 #endif
+}
 
 /**
  * @brief Check whether an error was detected.
@@ -689,8 +727,6 @@ static inline int z_impl_uart_config_get(struct device *dev,
 	return -ENOTSUP;
 }
 
-#ifdef CONFIG_UART_INTERRUPT_DRIVEN
-
 /**
  * @brief Fill FIFO with data.
  *
@@ -709,15 +745,17 @@ static inline int z_impl_uart_config_get(struct device *dev,
  *
  * @return Number of bytes sent.
  */
-static inline int uart_fifo_fill(struct device *dev, const u8_t *tx_data,
+static inline int uart_fifo_fill(struct device *dev, const uint8_t *tx_data,
 				 int size)
 {
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	const struct uart_driver_api *api =
 		(const struct uart_driver_api *)dev->driver_api;
 
 	if (api->fifo_fill) {
 		return api->fifo_fill(dev, tx_data, size);
 	}
+#endif
 
 	return 0;
 }
@@ -744,15 +782,17 @@ static inline int uart_fifo_fill(struct device *dev, const u8_t *tx_data,
  *
  * @return Number of bytes read.
  */
-static inline int uart_fifo_read(struct device *dev, u8_t *rx_data,
+static inline int uart_fifo_read(struct device *dev, uint8_t *rx_data,
 				 const int size)
 {
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	const struct uart_driver_api *api =
 		(const struct uart_driver_api *)dev->driver_api;
 
 	if (api->fifo_read) {
 		return api->fifo_read(dev, rx_data, size);
 	}
+#endif
 
 	return 0;
 }
@@ -768,12 +808,14 @@ __syscall void uart_irq_tx_enable(struct device *dev);
 
 static inline void z_impl_uart_irq_tx_enable(struct device *dev)
 {
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	const struct uart_driver_api *api =
 		(const struct uart_driver_api *)dev->driver_api;
 
 	if (api->irq_tx_enable) {
 		api->irq_tx_enable(dev);
 	}
+#endif
 }
 /**
  * @brief Disable TX interrupt in IER.
@@ -786,12 +828,14 @@ __syscall void uart_irq_tx_disable(struct device *dev);
 
 static inline void z_impl_uart_irq_tx_disable(struct device *dev)
 {
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	const struct uart_driver_api *api =
 		(const struct uart_driver_api *)dev->driver_api;
 
 	if (api->irq_tx_disable) {
 		api->irq_tx_disable(dev);
 	}
+#endif
 }
 
 /**
@@ -811,12 +855,14 @@ static inline void z_impl_uart_irq_tx_disable(struct device *dev)
  */
 static inline int uart_irq_tx_ready(struct device *dev)
 {
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	const struct uart_driver_api *api =
 		(const struct uart_driver_api *)dev->driver_api;
 
 	if (api->irq_tx_ready) {
 		return api->irq_tx_ready(dev);
 	}
+#endif
 
 	return 0;
 }
@@ -832,12 +878,14 @@ __syscall void uart_irq_rx_enable(struct device *dev);
 
 static inline void z_impl_uart_irq_rx_enable(struct device *dev)
 {
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	const struct uart_driver_api *api =
 		(const struct uart_driver_api *)dev->driver_api;
 
 	if (api->irq_rx_enable) {
 		api->irq_rx_enable(dev);
 	}
+#endif
 }
 
 /**
@@ -851,12 +899,14 @@ __syscall void uart_irq_rx_disable(struct device *dev);
 
 static inline void z_impl_uart_irq_rx_disable(struct device *dev)
 {
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	const struct uart_driver_api *api =
 		(const struct uart_driver_api *)dev->driver_api;
 
 	if (api->irq_rx_disable) {
 		api->irq_rx_disable(dev);
 	}
+#endif
 }
 
 /**
@@ -879,12 +929,14 @@ static inline void z_impl_uart_irq_rx_disable(struct device *dev)
  */
 static inline int uart_irq_tx_complete(struct device *dev)
 {
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	const struct uart_driver_api *api =
 		(const struct uart_driver_api *)dev->driver_api;
 
 	if (api->irq_tx_complete) {
 		return api->irq_tx_complete(dev);
 	}
+#endif
 
 	return -ENOTSUP;
 }
@@ -910,12 +962,14 @@ static inline int uart_irq_tx_complete(struct device *dev)
  */
 static inline int uart_irq_rx_ready(struct device *dev)
 {
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	const struct uart_driver_api *api =
 		(const struct uart_driver_api *)dev->driver_api;
 
 	if (api->irq_rx_ready) {
 		return api->irq_rx_ready(dev);
 	}
+#endif
 
 	return 0;
 }
@@ -930,12 +984,14 @@ __syscall void uart_irq_err_enable(struct device *dev);
 
 static inline void z_impl_uart_irq_err_enable(struct device *dev)
 {
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	const struct uart_driver_api *api =
 		(const struct uart_driver_api *)dev->driver_api;
 
 	if (api->irq_err_enable) {
 		api->irq_err_enable(dev);
 	}
+#endif
 }
 
 /**
@@ -950,12 +1006,14 @@ __syscall void uart_irq_err_disable(struct device *dev);
 
 static inline void z_impl_uart_irq_err_disable(struct device *dev)
 {
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	const struct uart_driver_api *api =
 		(const struct uart_driver_api *)dev->driver_api;
 
 	if (api->irq_err_disable) {
 		api->irq_err_disable(dev);
 	}
+#endif
 }
 
 /**
@@ -970,13 +1028,14 @@ __syscall int uart_irq_is_pending(struct device *dev);
 
 static inline int z_impl_uart_irq_is_pending(struct device *dev)
 {
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	const struct uart_driver_api *api =
 		(const struct uart_driver_api *)dev->driver_api;
 
 	if (api->irq_is_pending)	{
 		return api->irq_is_pending(dev);
 	}
-
+#endif
 	return 0;
 }
 
@@ -1007,13 +1066,14 @@ __syscall int uart_irq_update(struct device *dev);
 
 static inline int z_impl_uart_irq_update(struct device *dev)
 {
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	const struct uart_driver_api *api =
 		(const struct uart_driver_api *)dev->driver_api;
 
 	if (api->irq_update) {
 		return api->irq_update(dev);
 	}
-
+#endif
 	return 0;
 }
 
@@ -1035,12 +1095,14 @@ static inline void uart_irq_callback_user_data_set(
 					uart_irq_callback_user_data_t cb,
 					void *user_data)
 {
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	const struct uart_driver_api *api =
 		(const struct uart_driver_api *)dev->driver_api;
 
 	if ((api != NULL) && (api->irq_callback_set != NULL)) {
 		api->irq_callback_set(dev, cb, user_data);
 	}
+#endif
 }
 
 /**
@@ -1061,32 +1123,31 @@ static inline void uart_irq_callback_set(struct device *dev,
 					dev);
 }
 
-#endif
-
-#ifdef CONFIG_UART_LINE_CTRL
 
 /**
  * @brief Manipulate line control for UART.
  *
  * @param dev UART device structure.
- * @param ctrl The line control to manipulate.
+ * @param ctrl The line control to manipulate (see enum uart_line_ctrl).
  * @param val Value to set to the line control.
  *
  * @retval 0 If successful.
  * @retval failed Otherwise.
  */
 __syscall int uart_line_ctrl_set(struct device *dev,
-				 u32_t ctrl, u32_t val);
+				 uint32_t ctrl, uint32_t val);
 
 static inline int z_impl_uart_line_ctrl_set(struct device *dev,
-					   u32_t ctrl, u32_t val)
+					   uint32_t ctrl, uint32_t val)
 {
+#ifdef CONFIG_UART_LINE_CTRL
 	const struct uart_driver_api *api =
 		(const struct uart_driver_api *)dev->driver_api;
 
 	if (api->line_ctrl_set) {
 		return api->line_ctrl_set(dev, ctrl, val);
 	}
+#endif
 
 	return -ENOTSUP;
 }
@@ -1095,30 +1156,28 @@ static inline int z_impl_uart_line_ctrl_set(struct device *dev,
  * @brief Retrieve line control for UART.
  *
  * @param dev UART device structure.
- * @param ctrl The line control to manipulate.
- * @param val Value to get for the line control.
+ * @param ctrl The line control to retrieve (see enum uart_line_ctrl).
+ * @param val Pointer to variable where to store the line control value.
  *
  * @retval 0 If successful.
  * @retval failed Otherwise.
  */
-__syscall int uart_line_ctrl_get(struct device *dev, u32_t ctrl, u32_t *val);
+__syscall int uart_line_ctrl_get(struct device *dev, uint32_t ctrl, uint32_t *val);
 
 static inline int z_impl_uart_line_ctrl_get(struct device *dev,
-					   u32_t ctrl, u32_t *val)
+					   uint32_t ctrl, uint32_t *val)
 {
+#ifdef CONFIG_UART_LINE_CTRL
 	const struct uart_driver_api *api =
 		(const struct uart_driver_api *)dev->driver_api;
 
 	if (api && api->line_ctrl_get) {
 		return api->line_ctrl_get(dev, ctrl, val);
 	}
+#endif
 
 	return -ENOTSUP;
 }
-
-#endif /* CONFIG_UART_LINE_CTRL */
-
-#ifdef CONFIG_UART_DRV_CMD
 
 /**
  * @brief Send extra command to driver.
@@ -1133,21 +1192,21 @@ static inline int z_impl_uart_line_ctrl_get(struct device *dev,
  * @retval 0 If successful.
  * @retval failed Otherwise.
  */
-__syscall int uart_drv_cmd(struct device *dev, u32_t cmd, u32_t p);
+__syscall int uart_drv_cmd(struct device *dev, uint32_t cmd, uint32_t p);
 
-static inline int z_impl_uart_drv_cmd(struct device *dev, u32_t cmd, u32_t p)
+static inline int z_impl_uart_drv_cmd(struct device *dev, uint32_t cmd, uint32_t p)
 {
+#ifdef CONFIG_UART_DRV_CMD
 	const struct uart_driver_api *api =
 		(const struct uart_driver_api *)dev->driver_api;
 
 	if (api->drv_cmd) {
 		return api->drv_cmd(dev, cmd, p);
 	}
+#endif
 
 	return -ENOTSUP;
 }
-
-#endif /* CONFIG_UART_DRV_CMD */
 
 #ifdef __cplusplus
 }

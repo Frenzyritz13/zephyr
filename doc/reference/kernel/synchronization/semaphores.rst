@@ -47,7 +47,7 @@ Implementation
 Defining a Semaphore
 ====================
 
-A semaphore is defined using a variable of type :c:type:`struct k_sem`.
+A semaphore is defined using a variable of type :c:type:`k_sem`.
 It must then be initialized by calling :cpp:func:`k_sem_init()`.
 
 The following code defines a semaphore, then configures it as a binary
@@ -131,3 +131,12 @@ API Reference
 .. doxygengroup:: semaphore_apis
    :project: Zephyr
 
+User Mode Semaphore API Reference
+*********************************
+
+The sys_sem exists in user memory working as counter semaphore for user mode
+thread when user mode enabled. When user mode isn't enabled, sys_sem behaves
+like k_sem.
+
+.. doxygengroup:: user_semaphore_apis
+   :project: Zephyr

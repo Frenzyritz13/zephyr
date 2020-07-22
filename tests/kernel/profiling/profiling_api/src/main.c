@@ -19,8 +19,7 @@ static struct k_sem sync_sema;
 /**TESTPOINT: stack analyze*/
 static void tdata_dump_callback(const struct k_thread *thread, void *user_data)
 {
-	stack_analyze("Test", (char *)thread->stack_info.start,
-						thread->stack_info.size);
+	log_stack_usage(thread);
 }
 
 /*
@@ -40,7 +39,7 @@ __weak void _sys_pm_power_state_exit_post_ops(enum power_states state)
 }
 
 /* Our PM policy handler */
-enum power_states sys_pm_policy_next_state(s32_t ticks)
+enum power_states sys_pm_policy_next_state(int32_t ticks)
 {
 	static bool test_flag;
 
@@ -78,7 +77,7 @@ static void work_handler(struct k_work *w)
  *
  * @ingroup kernel_profiling_tests
  *
- * @see k_thread_foreach(), stack_analyze()
+ * @see k_thread_foreach(), log_stack_usage()
  */
 void test_call_stacks_analyze_main(void)
 {
@@ -95,12 +94,12 @@ void test_call_stacks_analyze_main(void)
  * @ingroup kernel_profiling_tests
  *
  * @see k_thread_foreach(), _sys_suspend(), _sys_resume(),
- * stack_analyze()
+ * log_stack_usage()
  */
 void test_call_stacks_analyze_idle(void)
 {
 	TC_PRINT("from idle thread:\n");
-	k_sleep(SLEEP_MS);
+	k_msleep(SLEEP_MS);
 }
 
 /**
@@ -112,7 +111,7 @@ void test_call_stacks_analyze_idle(void)
  * @ingroup kernel_profiling_tests
  *
  * @see k_thread_foreach(), k_work_init(), k_work_submit(),
- * stack_analyze()
+ * log_stack_usage()
  */
 void test_call_stacks_analyze_workq(void)
 {

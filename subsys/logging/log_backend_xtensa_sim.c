@@ -15,26 +15,22 @@
 #include "log_backend_std.h"
 #include <xtensa/simcall.h>
 
-#define CHAR_BUF_SIZE CONFIG_LOG_BACKEND_XTENSA_OUTPUT_BUFFER_SIZE
+#define CHAR_BUF_SIZE (IS_ENABLED(CONFIG_LOG_IMMEDIATE) ? \
+		1 : CONFIG_LOG_BACKEND_XTENSA_OUTPUT_BUFFER_SIZE)
 
-static u8_t buf[CHAR_BUF_SIZE];
+static uint8_t buf[CHAR_BUF_SIZE];
 
-static int char_out(u8_t *data, size_t length, void *ctx)
+static int char_out(uint8_t *data, size_t length, void *ctx)
 {
-	register int a1 __asm__ ("a2") = SYS_write;
-	register int b1 __asm__ ("a3") = 1;
-	register int c1 __asm__ ("a4") = (int) data;
-	register int d1 __asm__ ("a5") = length;
-	register int ret_val __asm__ ("a2");
-	register int ret_err __asm__ ("a3");
+	register int a2 __asm__ ("a2") = SYS_write;
+	register int a3 __asm__ ("a3") = 1;
+	register int a4 __asm__ ("a4") = (int) data;
+	register int a5 __asm__ ("a5") = length;
 
-	__asm__ __volatile__ (
-			"simcall\n"
-			"mov %0, a2\n"
-			"mov %1, a3\n"
-			: "=a" (ret_val), "=a" (ret_err), "+r"(a1), "+r"(b1)
-			: "r"(c1), "r"(d1)
-			: "memory");
+	__asm__ volatile("simcall"
+			 : "=a"(a2), "=a"(a3)
+			 : "a"(a2), "a"(a3), "a"(a4), "a"(a5));
+
 	return length;
 }
 
@@ -52,7 +48,7 @@ static void panic(struct log_backend const *const backend)
 	log_backend_std_panic(&log_output);
 }
 
-static void dropped(const struct log_backend *const backend, u32_t cnt)
+static void dropped(const struct log_backend *const backend, uint32_t cnt)
 {
 	ARG_UNUSED(backend);
 
@@ -60,7 +56,7 @@ static void dropped(const struct log_backend *const backend, u32_t cnt)
 }
 
 static void sync_string(const struct log_backend *const backend,
-		     struct log_msg_ids src_level, u32_t timestamp,
+		     struct log_msg_ids src_level, uint32_t timestamp,
 		     const char *fmt, va_list ap)
 {
 	log_backend_std_sync_string(&log_output, 0, src_level,
@@ -68,8 +64,8 @@ static void sync_string(const struct log_backend *const backend,
 }
 
 static void sync_hexdump(const struct log_backend *const backend,
-			 struct log_msg_ids src_level, u32_t timestamp,
-			 const char *metadata, const u8_t *data, u32_t length)
+			 struct log_msg_ids src_level, uint32_t timestamp,
+			 const char *metadata, const uint8_t *data, uint32_t length)
 {
 	log_backend_std_sync_hexdump(&log_output, 0, src_level,
 				     timestamp, metadata, data, length);

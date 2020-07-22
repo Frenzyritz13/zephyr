@@ -1,4 +1,4 @@
-.. _power_management:
+.. _power_management_api:
 
 Power Management
 ################
@@ -158,7 +158,7 @@ the following function.
 
 .. code-block:: c
 
-   enum power_states sys_pm_policy_next_state(s32_t ticks);
+   enum power_states sys_pm_policy_next_state(int32_t ticks);
 
 Dummy
 -----
@@ -269,7 +269,7 @@ in transition between power states:
 Device Model with Power Management Support
 ==========================================
 
-Drivers initialize the devices using macros. See :ref:`device_drivers` for
+Drivers initialize the devices using macros. See :ref:`device_model_api` for
 details on how these macros are used. Use the DEVICE_DEFINE macro to initialize
 drivers providing power management support via the PM control function.
 One of the macro parameters is the pointer to the device_pm_control handler function.
@@ -279,7 +279,7 @@ Default Initializer Function
 
 .. code-block:: c
 
-   int device_pm_control_nop(struct device *unused_device, u32_t unused_ctrl_command, void *unused_context);
+   int device_pm_control_nop(struct device *unused_device, uint32_t unused_ctrl_command, void *unused_context);
 
 
 If the driver doesn't implement any power control operations, the driver can
@@ -299,7 +299,7 @@ Get Device List
 
 .. code-block:: c
 
-   void device_list_get(struct device **device_list, int *device_count);
+   size_t z_device_get_all_static(struct device **device_list);
 
 The Zephyr RTOS kernel internally maintains a list of all devices in the system.
 The SOC interface uses this API to get the device list. The SOC interface can use the list to
@@ -315,7 +315,7 @@ Device Set Power State
 
 .. code-block:: c
 
-   int device_set_power_state(struct device *device, u32_t device_power_state, device_pm_cb cb, void *arg);
+   int device_set_power_state(struct device *device, uint32_t device_power_state, device_pm_cb cb, void *arg);
 
 Calls the :c:func:`device_pm_control()` handler function implemented by the
 device driver with DEVICE_PM_SET_POWER_STATE command.
@@ -325,7 +325,7 @@ Device Get Power State
 
 .. code-block:: c
 
-   int device_get_power_state(struct device *device, u32_t * device_power_state);
+   int device_get_power_state(struct device *device, uint32_t * device_power_state);
 
 Calls the :c:func:`device_pm_control()` handler function implemented by the
 device driver with DEVICE_PM_GET_POWER_STATE command.

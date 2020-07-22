@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <kernel_structs.h>
+#include <kernel.h>
 #include <cmsis_os.h>
+#include <string.h>
 
 K_MEM_SLAB_DEFINE(cmsis_semaphore_slab, sizeof(struct k_sem),
 		CONFIG_CMSIS_SEMAPHORE_MAX_COUNT, 4);
@@ -59,7 +60,7 @@ int32_t osSemaphoreWait(osSemaphoreId semaphore_id, uint32_t timeout)
 	} else if (timeout == 0U) {
 		status = k_sem_take(semaphore, K_NO_WAIT);
 	} else {
-		status = k_sem_take(semaphore, timeout);
+		status = k_sem_take(semaphore, K_MSEC(timeout));
 	}
 
 	/* If k_sem_take is successful, return the number of available

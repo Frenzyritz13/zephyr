@@ -60,8 +60,7 @@ static enum net_verdict process_ppp_msg(struct net_if *iface,
 {
 	struct ppp_context *ctx = net_if_l2_data(iface);
 	enum net_verdict verdict = NET_DROP;
-	struct ppp_protocol_handler *proto;
-	u16_t protocol;
+	uint16_t protocol;
 	int ret;
 
 	if (!ctx->is_init || !ctx->is_ready_to_serve) {
@@ -83,9 +82,7 @@ static enum net_verdict process_ppp_msg(struct net_if *iface,
 		return NET_CONTINUE;
 	}
 
-	for (proto = __net_ppp_proto_start;
-	     proto != __net_ppp_proto_end;
-	     proto++) {
+	Z_STRUCT_SECTION_FOREACH(ppp_protocol_handler, proto) {
 		if (proto->protocol != protocol) {
 			continue;
 		}
@@ -340,17 +337,17 @@ static int get_ppp_context(int idx, struct ppp_context **ctx,
 static void echo_reply_handler(void *user_data, size_t user_data_len)
 {
 	struct ppp_context *ctx = user_data;
-	u32_t end_time = k_cycle_get_32();
-	int time_diff;
+	uint32_t end_time = k_cycle_get_32();
+	uint32_t time_diff;
 
-	time_diff = abs(end_time - ctx->shell.echo_req_data);
+	time_diff = end_time - ctx->shell.echo_req_data;
 	ctx->shell.echo_req_data =
-		SYS_CLOCK_HW_CYCLES_TO_NS64(time_diff) / 1000;
+		k_cyc_to_ns_floor64(time_diff) / 1000;
 
 	k_sem_give(&ctx->shell.wait_echo_reply);
 }
 
-int net_ppp_ping(int idx, s32_t timeout)
+int net_ppp_ping(int idx, int32_t timeout)
 {
 	struct ppp_context *ctx;
 	struct net_if *iface;
@@ -373,7 +370,7 @@ int net_ppp_ping(int idx, s32_t timeout)
 		return ret;
 	}
 
-	ret = k_sem_take(&ctx->shell.wait_echo_reply, timeout);
+	ret = k_sem_take(&ctx->shell.wait_echo_reply, K_MSEC(timeout));
 
 	ctx->shell.echo_reply.cb = NULL;
 
@@ -418,8 +415,7 @@ static void ppp_startup(struct k_work *work)
 {
 	struct ppp_context *ctx = CONTAINER_OF(work, struct ppp_context,
 					       startup);
-	const struct ppp_protocol_handler *proto;
-	int count;
+	int count = 0;
 
 	if (!ctx->is_init) {
 		return;
@@ -427,14 +423,13 @@ static void ppp_startup(struct k_work *work)
 
 	NET_DBG("PPP %p startup for interface %p", ctx, ctx->iface);
 
-	for (proto = __net_ppp_proto_start, count = 0;
-	     proto != __net_ppp_proto_end;
-	     proto++, count++) {
+	Z_STRUCT_SECTION_FOREACH(ppp_protocol_handler, proto) {
 		if (proto->protocol == PPP_LCP) {
 			ppp_lcp = proto;
 		}
 
 		proto->init(ctx);
+		count++;
 	}
 
 	if (count == 0) {

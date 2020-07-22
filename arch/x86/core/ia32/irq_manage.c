@@ -20,7 +20,7 @@
 #include <sys/__assert.h>
 #include <sys/printk.h>
 #include <irq.h>
-#include <debug/tracing.h>
+#include <tracing/tracing.h>
 #include <kswap.h>
 #include <arch/x86/ia32/segmentation.h>
 
@@ -38,63 +38,9 @@ void *__attribute__((section(".spurNoErrIsr")))
 	MK_ISR_NAME(z_SpuriousIntNoErrCodeHandler) =
 		&z_SpuriousIntNoErrCodeHandler;
 
-/* FIXME: IRQ direct inline functions have to be placed here and not in
- * arch/cpu.h as inline functions due to nasty circular dependency between
- * arch/cpu.h and kernel_structs.h; the inline functions typically need to
- * perform operations on _kernel.  For now, leave as regular functions, a
- * future iteration will resolve this.
- *
- * See https://github.com/zephyrproject-rtos/zephyr/issues/3056
- */
-
-#ifdef CONFIG_SYS_POWER_MANAGEMENT
-void z_arch_irq_direct_pm(void)
+void arch_isr_direct_footer_swap(unsigned int key)
 {
-	if (_kernel.idle) {
-		s32_t idle_val = _kernel.idle;
-
-		_kernel.idle = 0;
-		z_sys_power_save_idle_exit(idle_val);
-	}
-}
-#endif
-
-void z_arch_isr_direct_header(void)
-{
-	sys_trace_isr_enter();
-
-	/* We're not going to unlock IRQs, but we still need to increment this
-	 * so that z_arch_is_in_isr() works
-	 */
-	++_kernel.nested;
-}
-
-void z_arch_isr_direct_footer(int swap)
-{
-	z_irq_controller_eoi();
-	sys_trace_isr_exit();
-	--_kernel.nested;
-
-	/* Call swap if all the following is true:
-	 *
-	 * 1) swap argument was enabled to this function
-	 * 2) We are not in a nested interrupt
-	 * 3) Next thread to run in the ready queue is not this thread
-	 */
-	if (swap != 0 && _kernel.nested == 0 &&
-	    _kernel.ready_q.cache != _current) {
-		unsigned int flags;
-
-		/* Fetch EFLAGS argument to z_swap() */
-		__asm__ volatile (
-			"pushfl\n\t"
-			"popl %0\n\t"
-			: "=g" (flags)
-			:
-			: "memory"
-			);
-		(void)z_swap_irqlock(flags);
-	}
+	(void)z_swap_irqlock(key);
 }
 
 #if CONFIG_X86_DYNAMIC_IRQ_STUBS > 0
@@ -223,7 +169,7 @@ static unsigned int priority_to_free_vector(unsigned int requested_priority)
  */
 static void *get_dynamic_stub(int stub_idx)
 {
-	u32_t offset;
+	uint32_t offset;
 
 	/*
 	 * Because we want the sizes of the stubs to be consistent and minimized,
@@ -235,7 +181,7 @@ static void *get_dynamic_stub(int stub_idx)
 		((stub_idx / Z_DYN_STUB_PER_BLOCK) *
 		 Z_DYN_STUB_LONG_JMP_EXTRA_SIZE);
 
-	return (void *)((u32_t)&z_dynamic_stubs_begin + offset);
+	return (void *)((uint32_t)&z_dynamic_stubs_begin + offset);
 }
 
 extern const struct pseudo_descriptor z_x86_idt;
@@ -246,13 +192,13 @@ static void idt_vector_install(int vector, void *irq_handler)
 
 	key = irq_lock();
 	z_init_irq_gate(&z_x86_idt.entries[vector], CODE_SEG,
-		       (u32_t)irq_handler, 0);
+		       (uint32_t)irq_handler, 0);
 	irq_unlock(key);
 }
 
-int z_arch_irq_connect_dynamic(unsigned int irq, unsigned int priority,
+int arch_irq_connect_dynamic(unsigned int irq, unsigned int priority,
 		void (*routine)(void *parameter), void *parameter,
-		u32_t flags)
+		uint32_t flags)
 {
 	int vector, stub_idx, key;
 
@@ -287,7 +233,7 @@ int z_arch_irq_connect_dynamic(unsigned int irq, unsigned int priority,
  *
  * @param stub_idx Index into the dyn_irq_list array
  */
-void z_x86_dynamic_irq_handler(u8_t stub_idx)
+void z_x86_dynamic_irq_handler(uint8_t stub_idx)
 {
 	dyn_irq_list[stub_idx].handler(dyn_irq_list[stub_idx].param);
 }

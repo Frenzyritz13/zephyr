@@ -17,6 +17,8 @@
 #include <logging/log.h>
 LOG_MODULE_DECLARE(os);
 
+#ifdef CONFIG_MINIMAL_LIBC_MALLOC
+
 #if (CONFIG_MINIMAL_LIBC_MALLOC_ARENA_SIZE > 0)
 #ifdef CONFIG_USERSPACE
 K_APPMEM_PARTITION_DEFINE(z_malloc_partition);
@@ -55,35 +57,12 @@ void *malloc(size_t size)
 {
 	ARG_UNUSED(size);
 
-	LOG_DBG("CONFIG_MINIMAL_LIBC_MALLOC_ARENA_SIZE is 0");
+	LOG_ERR("CONFIG_MINIMAL_LIBC_MALLOC_ARENA_SIZE is 0");
 	errno = ENOMEM;
 
 	return NULL;
 }
 #endif
-
-void free(void *ptr)
-{
-	sys_mem_pool_free(ptr);
-}
-
-void *calloc(size_t nmemb, size_t size)
-{
-	void *ret;
-
-	if (size_mul_overflow(nmemb, size, &size)) {
-		errno = ENOMEM;
-		return NULL;
-	}
-
-	ret = malloc(size);
-
-	if (ret != NULL) {
-		(void)memset(ret, 0, size);
-	}
-
-	return ret;
-}
 
 void *realloc(void *ptr, size_t requested_size)
 {
@@ -116,7 +95,33 @@ void *realloc(void *ptr, size_t requested_size)
 	return new_ptr;
 }
 
+void free(void *ptr)
+{
+	sys_mem_pool_free(ptr);
+}
+#endif /* CONFIG_MINIMAL_LIBC_MALLOC */
 
+#ifdef CONFIG_MINIMAL_LIBC_CALLOC
+void *calloc(size_t nmemb, size_t size)
+{
+	void *ret;
+
+	if (size_mul_overflow(nmemb, size, &size)) {
+		errno = ENOMEM;
+		return NULL;
+	}
+
+	ret = malloc(size);
+
+	if (ret != NULL) {
+		(void)memset(ret, 0, size);
+	}
+
+	return ret;
+}
+#endif /* CONFIG_MINIMAL_LIBC_CALLOC */
+
+#ifdef CONFIG_MINIMAL_LIBC_REALLOCARRAY
 void *reallocarray(void *ptr, size_t nmemb, size_t size)
 {
 	if (size_mul_overflow(nmemb, size, &size)) {
@@ -125,3 +130,4 @@ void *reallocarray(void *ptr, size_t nmemb, size_t size)
 	}
 	return realloc(ptr, size);
 }
+#endif /* CONFIG_MINIMAL_LIBC_REALLOCARRAY */

@@ -62,6 +62,11 @@ struct ppp_api {
 #endif
 };
 
+/* Make sure that the network interface API is properly setup inside
+ * PPP API struct (it is the first one).
+ */
+BUILD_ASSERT(offsetof(struct ppp_api, iface_api) == 0);
+
 /**
  * PPP protocol types.
  * See https://www.iana.org/assignments/ppp-numbers/ppp-numbers.xhtml
@@ -170,6 +175,20 @@ enum ipcp_option_type {
 
 	/** IP Address */
 	IPCP_OPTION_IP_ADDRESS = 3,
+
+	/* RFC 1877 */
+
+	/** Primary DNS Server Address */
+	IPCP_OPTION_DNS1 = 129,
+
+	/** Primary NBNS Server Address */
+	IPCP_OPTION_NBNS1 = 130,
+
+	/** Secondary DNS Server Address */
+	IPCP_OPTION_DNS2 = 131,
+
+	/** Secondary NBNS Server Address */
+	IPCP_OPTION_NBNS2 = 132,
 } __packed;
 
 /**
@@ -200,24 +219,11 @@ struct ppp_fsm {
 	/** Timeout timer */
 	struct k_delayed_work timer;
 
-	/* We need to send a packet from separate thread so that we do not
-	 * receive reply before we are ready to receive it. The issue was seen
-	 * with QEMU where the link to peer is so fast that we received the
-	 * reply before the net_send_data() returned.
-	 */
-	struct {
-		/** Packet sending timer. */
-		struct k_delayed_work work;
-
-		/** Packet to send */
-		struct net_pkt *pkt;
-	} sender;
-
 	struct {
 		/** Acknowledge Configuration Information */
 		int (*config_info_ack)(struct ppp_fsm *fsm,
 				       struct net_pkt *pkt,
-				       u16_t length);
+				       uint16_t length);
 
 		/** Add Configuration Information */
 		struct net_buf *(*config_info_add)(struct ppp_fsm *fsm);
@@ -228,19 +234,19 @@ struct ppp_fsm {
 		/** Negative Acknowledge Configuration Information */
 		int (*config_info_nack)(struct ppp_fsm *fsm,
 					struct net_pkt *pkt,
-					u16_t length,
+					uint16_t length,
 					bool rejected);
 
 		/** Request peer's Configuration Information */
 		int (*config_info_req)(struct ppp_fsm *fsm,
 				       struct net_pkt *pkt,
-				       u16_t length,
+				       uint16_t length,
 				       struct net_buf **buf);
 
 		/** Reject Configuration Information */
 		int (*config_info_rej)(struct ppp_fsm *fsm,
 				       struct net_pkt *pkt,
-				       u16_t length);
+				       uint16_t length);
 
 		/** Reset Configuration Information */
 		void (*config_info_reset)(struct ppp_fsm *fsm);
@@ -268,27 +274,27 @@ struct ppp_fsm {
 		 */
 		enum net_verdict (*proto_extension)(struct ppp_fsm *fsm,
 						    enum ppp_packet_type code,
-						    u8_t id,
+						    uint8_t id,
 						    struct net_pkt *pkt);
 	} cb;
 
 	/** Option bits */
-	u32_t flags;
+	uint32_t flags;
 
 	/** Number of re-transmissions left */;
-	u32_t retransmits;
+	uint32_t retransmits;
 
 	/** Number of NACK loops since last ACK */
-	u32_t nack_loops;
+	uint32_t nack_loops;
 
 	/** Number of NACKs received */
-	u32_t recv_nack_loops;
+	uint32_t recv_nack_loops;
 
 	/** Reason for closing protocol */
 	char terminate_reason[PPP_MAX_TERMINATE_REASON_LEN];
 
 	/** PPP protocol number for this FSM */
-	u16_t protocol;
+	uint16_t protocol;
 
 	/** Current state of PPP link */
 	enum ppp_state state;
@@ -297,13 +303,13 @@ struct ppp_fsm {
 	const char *name;
 
 	/** Current id */
-	u8_t id;
+	uint8_t id;
 
 	/** Current request id */
-	u8_t req_id;
+	uint8_t req_id;
 
 	/** Have received valid Ack, Nack or Reject to a Request */
-	u8_t ack_received : 1;
+	uint8_t ack_received : 1;
 };
 
 /** PPP configuration options */
@@ -319,45 +325,47 @@ struct ppp_option_pkt {
 	} type;
 
 	/** Option length */
-	u8_t len;
+	uint8_t len;
 };
 
 struct lcp_options {
 	/** Magic number */
-	u32_t magic;
+	uint32_t magic;
 
 	/** Async char map */
-	u32_t async_map;
+	uint32_t async_map;
 
 	/** Maximum Receive Unit value */
-	u16_t mru;
+	uint16_t mru;
 
 	/* Flags what to negotiate */
 
 	/** Negotiate MRU */
-	u16_t negotiate_mru : 1;
+	uint16_t negotiate_mru : 1;
 
 	/** Negotiate */
-	u16_t negotiate_async_map :1;
+	uint16_t negotiate_async_map :1;
 
 	/** Negotiate HDLC protocol field compression*/
-	u16_t negotiate_proto_compression :1;
+	uint16_t negotiate_proto_compression :1;
 
 	/** Negotiate HDLC address/control field compression */
-	u16_t negotiate_addr_compression :1;
+	uint16_t negotiate_addr_compression :1;
 
 	/** Negotiate magic number */
-	u16_t negotiate_magic :1;
+	uint16_t negotiate_magic :1;
 };
 
 struct ipcp_options {
 	/** IPv4 address */
 	struct in_addr address;
+	struct in_addr dns1_address;
+	struct in_addr dns2_address;
 };
 
 struct ipv6cp_options {
 	/** Interface identifier */
-	u8_t iid[PPP_INTERFACE_IDENTIFIER_LEN];
+	uint8_t iid[PPP_INTERFACE_IDENTIFIER_LEN];
 };
 
 /** PPP L2 context specific to certain network interface */
@@ -395,7 +403,7 @@ struct ppp_context {
 		struct lcp_options peer_accepted;
 
 		/** Magic-Number value */
-		u32_t magic;
+		uint32_t magic;
 	} lcp;
 
 #if defined(CONFIG_NET_IPV4)
@@ -454,10 +462,10 @@ struct ppp_context {
 		struct k_sem wait_echo_reply;
 
 		/** Echo-Req data value */
-		u32_t echo_req_data;
+		uint32_t echo_req_data;
 
 		/** Echo-Reply data value */
-		u32_t echo_reply_data;
+		uint32_t echo_reply_data;
 	} shell;
 #endif
 
@@ -477,34 +485,31 @@ struct ppp_context {
 	int network_protos_up;
 
 	/** Is this context already initialized */
-	u16_t is_init : 1;
+	uint16_t is_init : 1;
 
 	/** Is PPP ready to receive packets */
-	u16_t is_ready_to_serve : 1;
+	uint16_t is_ready_to_serve : 1;
 
 	/** Is PPP L2 enabled or not */
-	u16_t is_enabled : 1;
+	uint16_t is_enabled : 1;
 
 	/** PPP startup pending */
-	u16_t is_startup_pending : 1;
+	uint16_t is_startup_pending : 1;
 
 	/** PPP enable pending */
-	u16_t is_enable_done : 1;
-
-	/** Network status (up / down) */
-	u16_t is_network_up : 1;
+	uint16_t is_enable_done : 1;
 
 	/** IPCP status (up / down) */
-	u16_t is_ipcp_up : 1;
+	uint16_t is_ipcp_up : 1;
 
 	/** IPCP open status (open / closed) */
-	u16_t is_ipcp_open : 1;
+	uint16_t is_ipcp_open : 1;
 
 	/** IPV6CP status (up / down) */
-	u16_t is_ipv6cp_up : 1;
+	uint16_t is_ipv6cp_up : 1;
 
 	/** IPV6CP open status (open / closed) */
-	u16_t is_ipv6cp_open : 1;
+	uint16_t is_ipv6cp_open : 1;
 };
 
 /**
@@ -590,15 +595,16 @@ static inline void ppp_mgmt_raise_carrier_off_event(struct net_if *iface)
  * @brief Send PPP Echo-Request to peer. We expect to receive Echo-Reply back.
  *
  * @param idx PPP network interface index
- * @param timeout Amount of time to wait Echo-Reply.
+ * @param timeout Amount of time to wait Echo-Reply. The value is in
+ * milliseconds.
  *
  * @return 0 if Echo-Reply was received, < 0 if there is a timeout or network
  * index is not a valid PPP network index.
  */
 #if defined(CONFIG_NET_L2_PPP)
-int net_ppp_ping(int idx, s32_t timeout);
+int net_ppp_ping(int idx, int32_t timeout);
 #else
-static inline int net_ppp_ping(int idx, s32_t timeout)
+static inline int net_ppp_ping(int idx, int32_t timeout)
 {
 	ARG_UNUSED(idx);
 	ARG_UNUSED(timeout);

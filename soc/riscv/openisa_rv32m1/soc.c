@@ -66,7 +66,7 @@ void sys_arch_reboot(int type)
 	EVENT_UNIT->SLPCTRL |= EVENT_SLPCTRL_SYSRSTREQST_MASK;
 }
 
-void z_arch_irq_enable(unsigned int irq)
+void arch_irq_enable(unsigned int irq)
 {
 	if (IS_ENABLED(CONFIG_MULTI_LEVEL_INTERRUPTS)) {
 		unsigned int level = rv32m1_irq_level(irq);
@@ -84,7 +84,7 @@ void z_arch_irq_enable(unsigned int irq)
 	}
 }
 
-void z_arch_irq_disable(unsigned int irq)
+void arch_irq_disable(unsigned int irq)
 {
 	if (IS_ENABLED(CONFIG_MULTI_LEVEL_INTERRUPTS)) {
 		unsigned int level = rv32m1_irq_level(irq);
@@ -102,7 +102,7 @@ void z_arch_irq_disable(unsigned int irq)
 	}
 }
 
-int z_arch_irq_is_enabled(unsigned int irq)
+int arch_irq_is_enabled(unsigned int irq)
 {
 	if (IS_ENABLED(CONFIG_MULTI_LEVEL_INTERRUPTS)) {
 		unsigned int level = rv32m1_irq_level(irq);
@@ -111,7 +111,7 @@ int z_arch_irq_is_enabled(unsigned int irq)
 			return (EVENT_UNIT->INTPTEN &
 				BIT(rv32m1_level1_irq(irq))) != 0;
 		} else {
-			u32_t channel, line, ier;
+			uint32_t channel, line, ier;
 
 			/*
 			 * Here we break the abstraction and look
@@ -146,7 +146,8 @@ void soc_interrupt_init(void)
 	(void)(EVENT_UNIT->EVTPENDCLEAR); /* Ensures write has finished. */
 
 	if (IS_ENABLED(CONFIG_MULTI_LEVEL_INTERRUPTS)) {
-		dev_intmux = device_get_binding(DT_OPENISA_RV32M1_INTMUX_INTMUX_LABEL);
+		dev_intmux = device_get_binding(
+				DT_LABEL(DT_INST(0, openisa_rv32m1_intmux)));
 		__ASSERT(dev_intmux, "no INTMUX device found");
 	}
 }
@@ -190,6 +191,27 @@ static void rv32m1_switch_to_sirc(void)
 }
 
 /**
+ * @brief Setup peripheral clocks
+ *
+ * Setup the peripheral clock sources.
+ */
+static void rv32m1_setup_peripheral_clocks(void)
+{
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(tpm0), okay)
+	CLOCK_SetIpSrc(kCLOCK_Tpm0, kCLOCK_IpSrcFircAsync);
+#endif
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(tpm1), okay)
+	CLOCK_SetIpSrc(kCLOCK_Tpm1, kCLOCK_IpSrcFircAsync);
+#endif
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(tpm2), okay)
+	CLOCK_SetIpSrc(kCLOCK_Tpm2, kCLOCK_IpSrcFircAsync);
+#endif
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(tpm3), okay)
+	CLOCK_SetIpSrc(kCLOCK_Tpm3, kCLOCK_IpSrcFircAsync);
+#endif
+}
+
+/**
  * @brief Perform basic hardware initialization
  *
  * Initializes the base clocks and LPFLL using helpers provided by the HAL.
@@ -213,6 +235,9 @@ static int soc_rv32m1_init(struct device *arg)
 
 	/* Initialize LPFLL */
 	CLOCK_InitLpFll(&rv32m1_lpfll_cfg);
+
+	/* Initialize peripheral clocks */
+	rv32m1_setup_peripheral_clocks();
 
 	irq_unlock(key);
 

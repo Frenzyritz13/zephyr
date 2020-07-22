@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr.h>
 #include <ztest.h>
 #include <tc_util.h>
 
@@ -13,9 +12,8 @@
 #include <usb/usb_common.h>
 #include <usb_descriptor.h>
 
-#define LOG_LEVEL LOG_LEVEL_DBG
 #include <logging/log.h>
-LOG_MODULE_REGISTER(test_main);
+LOG_MODULE_REGISTER(test_main, LOG_LEVEL_DBG);
 
 #ifdef CONFIG_USB_COMPOSITE_DEVICE
 #error Do not use composite configuration
@@ -27,7 +25,7 @@ extern struct usb_desc_header __usb_descriptor_end[];
 extern struct usb_cfg_data __usb_data_start[];
 extern struct usb_cfg_data __usb_data_end[];
 
-u8_t *usb_get_device_descriptor(void);
+uint8_t *usb_get_device_descriptor(void);
 
 struct usb_test_config {
 	struct usb_if_descriptor if0;
@@ -37,6 +35,7 @@ struct usb_test_config {
 } __packed;
 
 #define TEST_BULK_EP_MPS		64
+#define TEST_DESCRIPTOR_TABLE_SPAN	157
 
 #define INITIALIZER_IF							\
 	{								\
@@ -109,7 +108,7 @@ struct usb_test_config {
 #define NUM_INSTANCES 2
 
 static void interface_config(struct usb_desc_header *head,
-			     u8_t iface_num)
+			     uint8_t iface_num)
 {
 	struct usb_if_descriptor *if_desc = (struct usb_if_descriptor *)head;
 
@@ -137,7 +136,7 @@ static struct usb_cfg_data *usb_get_cfg_data(struct usb_if_descriptor *iface)
 
 static bool find_cfg_data_ep(const struct usb_ep_descriptor * const ep_descr,
 			     const struct usb_cfg_data * const cfg_data,
-			     u8_t ep_count)
+			     uint8_t ep_count)
 {
 	for (int i = 0; i < cfg_data->num_endpoints; i++) {
 		if (cfg_data->endpoint[i].ep_addr ==
@@ -160,8 +159,8 @@ static bool find_cfg_data_ep(const struct usb_ep_descriptor * const ep_descr,
 static void check_endpoint_allocation(struct usb_desc_header *head)
 {
 	struct usb_cfg_data *cfg_data = NULL;
-	static u8_t interfaces;
-	u8_t ep_count = 0;
+	static uint8_t interfaces;
+	uint8_t ep_count = 0;
 
 	while (head->bLength != 0) {
 		if (head->bDescriptorType == USB_INTERFACE_DESC) {
@@ -194,7 +193,7 @@ static void check_endpoint_allocation(struct usb_desc_header *head)
 			ep_count++;
 		}
 
-		head = (struct usb_desc_header *)((u8_t *)head + head->bLength);
+		head = (struct usb_desc_header *)((uint8_t *)head + head->bLength);
 	}
 }
 
@@ -221,11 +220,11 @@ static void test_desc_sections(void)
 
 	LOG_DBG("Starting logs");
 
-	LOG_HEXDUMP_DBG((u8_t *)__usb_descriptor_start,
+	LOG_HEXDUMP_DBG((uint8_t *)__usb_descriptor_start,
 			SYMBOL_SPAN(__usb_descriptor_end, __usb_descriptor_start),
 			"USB Descriptor table section");
 
-	LOG_HEXDUMP_DBG((u8_t *)__usb_data_start,
+	LOG_HEXDUMP_DBG((uint8_t *)__usb_data_start,
 			SYMBOL_SPAN(__usb_data_end, __usb_data_start),
 			"USB Configuratio structures section");
 
@@ -233,7 +232,7 @@ static void test_desc_sections(void)
 	zassert_not_null(head, NULL);
 
 	zassert_equal(SYMBOL_SPAN(__usb_descriptor_end, __usb_descriptor_start),
-		      133, NULL);
+		      TEST_DESCRIPTOR_TABLE_SPAN, NULL);
 
 	/* Calculate number of structures */
 	zassert_equal(__usb_data_end - __usb_data_start, NUM_INSTANCES, NULL);

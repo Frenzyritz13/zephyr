@@ -11,14 +11,6 @@
 	model = "Adafruit Trinket M0";
 	compatible = "adafruit,trinket-m0", "atmel,samd21e18a", "atmel,samd21";
 
-	soc {
-		nvmctrl: nvmctrl@41004000  {
-			flash0: flash@0 {
-				reg = <0x2000 0x3E000>;
-			};
-		};
-	};
-
 	chosen {
 		zephyr,console = &sercom0;
 		zephyr,shell-uart = &sercom0;
@@ -30,6 +22,7 @@
 	/* These aliases are provided for compatibility with samples */
 	aliases {
 		led0 = &led0;
+		pwm-led0 = &pwm_led0;
 	};
 
 	leds {
@@ -37,6 +30,14 @@
 		led0: led_0 {
 			gpios = <&porta 10 0>;
 			label = "LED";
+		};
+	};
+
+	pwmleds {
+		compatible = "pwm-leds";
+
+		pwm_led0: pwm_led_0 {
+			pwms = <&tcc0 2>;
 		};
 	};
 };
@@ -78,6 +79,15 @@
 	};
 };
 
+&tcc0 {
+	status = "okay";
+	compatible = "atmel,sam0-tcc-pwm";
+	/* Gives a maximum period of 1.4 s */
+	prescaler = <4>;
+
+	#pwm-cells = <1>;
+};
+
 &flash0 {
 	partitions {
 		compatible = "fixed-partitions";
@@ -97,8 +107,9 @@
 		};
 
 		/*
-		 * The final 16 KiB is reserved for the application
-		 * and is used by NFFS if enabled.
+		 * The final 16 KiB is reserved for the application.
+		 * Storage partition will be used by FCB/LittleFS/NVS
+		 * if enabled.
 		 */
 		storage_partition: partition@3c000 {
 			label = "storage";

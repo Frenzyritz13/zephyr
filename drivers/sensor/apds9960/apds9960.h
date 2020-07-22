@@ -215,12 +215,13 @@
 struct apds9960_config {
 	char *i2c_name;
 	char *gpio_name;
-	u8_t gpio_pin;
-	u8_t i2c_address;
-	u8_t pgain;
-	u8_t again;
-	u8_t ppcount;
-	u8_t pled_boost;
+	uint8_t gpio_pin;
+	unsigned int gpio_flags;
+	uint8_t i2c_address;
+	uint8_t pgain;
+	uint8_t again;
+	uint8_t ppcount;
+	uint8_t pled_boost;
 };
 
 struct apds9960_data {
@@ -229,9 +230,9 @@ struct apds9960_data {
 	struct gpio_callback gpio_cb;
 	struct k_work work;
 	struct device *dev;
-	u16_t sample_crgb[4];
-	u8_t pdata;
-	u8_t gpio_pin;
+	uint16_t sample_crgb[4];
+	uint8_t pdata;
+	uint8_t gpio_pin;
 
 #ifdef CONFIG_APDS9960_TRIGGER
 	sensor_trigger_handler_t p_th_handler;
@@ -240,6 +241,18 @@ struct apds9960_data {
 	struct k_sem data_sem;
 #endif
 };
+
+static inline void apds9960_setup_int(struct apds9960_data *drv_data,
+				      bool enable)
+{
+	unsigned int flags = enable
+		? GPIO_INT_EDGE_TO_ACTIVE
+		: GPIO_INT_DISABLE;
+
+	gpio_pin_interrupt_configure(drv_data->gpio,
+				     drv_data->gpio_pin,
+				     flags);
+}
 
 #ifdef CONFIG_APDS9960_TRIGGER
 void apds9960_work_cb(struct k_work *work);

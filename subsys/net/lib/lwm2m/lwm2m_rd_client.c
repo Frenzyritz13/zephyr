@@ -61,11 +61,14 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
 #define LWM2M_RD_CLIENT_URI "rd"
 
-#define SECONDS_TO_UPDATE_EARLY	6
-#define STATE_MACHINE_UPDATE_INTERVAL K_MSEC(500)
+#define SECONDS_TO_UPDATE_EARLY	CONFIG_LWM2M_SECONDS_TO_UPDATE_EARLY
+#define STATE_MACHINE_UPDATE_INTERVAL_MS 500
 
 /* Leave room for 32 hexadeciaml digits (UUID) + NULL */
 #define CLIENT_EP_LEN		33
+
+/* Up to 3 characters + NULL */
+#define CLIENT_BINDING_LEN sizeof("UQS")
 
 /* The states for the RD client state machine */
 /*
@@ -84,6 +87,7 @@ enum sm_engine_state {
 	ENGINE_DO_REGISTRATION,
 	ENGINE_REGISTRATION_SENT,
 	ENGINE_REGISTRATION_DONE,
+	ENGINE_REGISTRATION_DONE_RX_OFF,
 	ENGINE_UPDATE_SENT,
 	ENGINE_DEREGISTER,
 	ENGINE_DEREGISTER_SENT,
@@ -92,13 +96,14 @@ enum sm_engine_state {
 };
 
 struct lwm2m_rd_client_info {
-	u32_t lifetime;
+	uint32_t lifetime;
 	struct lwm2m_ctx *ctx;
-	u8_t engine_state;
-	u8_t use_bootstrap;
-	u8_t trigger_update;
+	uint8_t engine_state;
+	uint8_t use_bootstrap;
+	uint8_t trigger_update;
 
-	s64_t last_update;
+	int64_t last_update;
+	int64_t last_tx;
 
 	char ep_name[CLIENT_EP_LEN];
 	char server_ep[CLIENT_EP_LEN];
@@ -108,9 +113,14 @@ struct lwm2m_rd_client_info {
 
 /* buffers */
 static char query_buffer[64]; /* allocate some data for queries and updates */
-static u8_t client_data[256]; /* allocate some data for the RD */
+static uint8_t client_data[256]; /* allocate some data for the RD */
 
-static void set_sm_state(u8_t sm_state)
+void engine_update_tx_time(void)
+{
+	client.last_tx = k_uptime_get();
+}
+
+static void set_sm_state(uint8_t sm_state)
 {
 	enum lwm2m_rd_client_event event = LWM2M_RD_CLIENT_EVENT_NONE;
 
@@ -127,6 +137,8 @@ static void set_sm_state(u8_t sm_state)
 		event = LWM2M_RD_CLIENT_EVENT_REG_UPDATE_COMPLETE;
 	} else if (sm_state == ENGINE_REGISTRATION_DONE) {
 		event = LWM2M_RD_CLIENT_EVENT_REGISTRATION_COMPLETE;
+	} else if (sm_state == ENGINE_REGISTRATION_DONE_RX_OFF) {
+		event = LWM2M_RD_CLIENT_EVENT_QUEUE_MODE_RX_OFF;
 	} else if ((sm_state == ENGINE_INIT ||
 		    sm_state == ENGINE_DEREGISTERED) &&
 		   (client.engine_state >= ENGINE_DO_REGISTRATION &&
@@ -148,7 +160,7 @@ static bool sm_is_registered(void)
 		client.engine_state <= ENGINE_DEREGISTER_FAILED);
 }
 
-static u8_t get_sm_state(void)
+static uint8_t get_sm_state(void)
 {
 	/* TODO: add locking? */
 	return client.engine_state;
@@ -181,6 +193,20 @@ static void sm_handle_timeout_state(struct lwm2m_message *msg,
 	}
 }
 
+/* force state machine restart */
+void engine_trigger_restart(void)
+{
+	lwm2m_engine_context_close(client.ctx);
+
+	client.ctx->sec_obj_inst = -1;
+
+	/* Jump directly to the registration phase. In case there is no valid
+	 * security object for the LWM2M server, it will fall back to the
+	 * bootstrap procedure.
+	 */
+	set_sm_state(ENGINE_DO_REGISTRATION);
+}
+
 /* force re-update with remote peer */
 void engine_trigger_update(void)
 {
@@ -195,7 +221,7 @@ static int do_bootstrap_reply_cb(const struct coap_packet *response,
 				 struct coap_reply *reply,
 				 const struct sockaddr *from)
 {
-	u8_t code;
+	uint8_t code;
 
 	code = coap_header_get_code(response);
 	LOG_DBG("Bootstrap callback (code:%u.%u)",
@@ -242,7 +268,7 @@ static int do_registration_reply_cb(const struct coap_packet *response,
 				    const struct sockaddr *from)
 {
 	struct coap_option options[2];
-	u8_t code;
+	uint8_t code;
 	int ret;
 
 	code = coap_header_get_code(response);
@@ -309,7 +335,7 @@ static int do_update_reply_cb(const struct coap_packet *response,
 			      struct coap_reply *reply,
 			      const struct sockaddr *from)
 {
-	u8_t code;
+	uint8_t code;
 
 	code = coap_header_get_code(response);
 	LOG_INF("Update callback (code:%u.%u)",
@@ -346,7 +372,7 @@ static int do_deregister_reply_cb(const struct coap_packet *response,
 				  struct coap_reply *reply,
 				  const struct sockaddr *from)
 {
-	u8_t code;
+	uint8_t code;
 
 	code = coap_header_get_code(response);
 	LOG_DBG("Deregister callback (code:%u.%u)",
@@ -378,7 +404,7 @@ static void do_deregister_timeout_cb(struct lwm2m_message *msg)
 }
 
 static int sm_select_next_sec_inst(bool bootstrap_server,
-				   int *sec_obj_inst, u32_t *lifetime)
+				   int *sec_obj_inst, uint32_t *lifetime)
 {
 	char pathstr[MAX_RESOURCE_LEN];
 	int ret, end, i, obj_inst_id, found = -1;
@@ -546,12 +572,6 @@ cleanup_engine:
 	return ret;
 }
 
-static int sm_bootstrap_reg_done(void)
-{
-	LOG_INF("Bootstrap registration done.");
-	return 0;
-}
-
 void engine_bootstrap_finish(void)
 {
 	LOG_INF("Bootstrap data transfer done!");
@@ -577,8 +597,9 @@ static int sm_send_registration(bool send_obj_support_data,
 				lwm2m_message_timeout_cb_t timeout_cb)
 {
 	struct lwm2m_message *msg;
-	u16_t client_data_len;
+	uint16_t client_data_len;
 	int ret;
+	char binding[CLIENT_BINDING_LEN];
 
 	msg = lwm2m_get_message(client.ctx);
 	if (!msg) {
@@ -633,7 +654,15 @@ static int sm_send_registration(bool send_obj_support_data,
 	coap_packet_append_option(&msg->cpkt, COAP_OPTION_URI_QUERY,
 				  query_buffer, strlen(query_buffer));
 
-	/* TODO: add supported binding query string */
+	lwm2m_engine_get_binding(binding);
+	/* UDP is a default binding, no need to add option if UDP is used. */
+	if (strcmp(binding, "U") != 0) {
+		snprintk(query_buffer, sizeof(query_buffer) - 1,
+			 "b=%s", binding);
+		/* TODO: handle return error */
+		coap_packet_append_option(&msg->cpkt, COAP_OPTION_URI_QUERY,
+					  query_buffer, strlen(query_buffer));
+	}
 
 	if (send_obj_support_data) {
 		ret = coap_packet_append_payload_marker(&msg->cpkt);
@@ -742,6 +771,13 @@ static int sm_registration_done(void)
 		}
 	}
 
+	if (IS_ENABLED(CONFIG_LWM2M_QUEUE_MODE_ENABLED) &&
+	    (client.engine_state != ENGINE_REGISTRATION_DONE_RX_OFF) &&
+	    (((k_uptime_get() - client.last_tx) / 1000) >=
+	     CONFIG_LWM2M_QUEUE_MODE_UPTIME)) {
+		set_sm_state(ENGINE_REGISTRATION_DONE_RX_OFF);
+	}
+
 	return ret;
 }
 
@@ -812,7 +848,6 @@ static void lwm2m_rd_client_service(struct k_work *work)
 			break;
 
 		case ENGINE_BOOTSTRAP_REG_DONE:
-			sm_bootstrap_reg_done();
 			/* wait for transfer done */
 			break;
 
@@ -830,6 +865,7 @@ static void lwm2m_rd_client_service(struct k_work *work)
 			break;
 
 		case ENGINE_REGISTRATION_DONE:
+		case ENGINE_REGISTRATION_DONE_RX_OFF:
 			sm_registration_done();
 			break;
 
@@ -862,6 +898,7 @@ void lwm2m_rd_client_start(struct lwm2m_ctx *client_ctx, const char *ep_name,
 			   lwm2m_ctx_event_cb_t event_cb)
 {
 	client.ctx = client_ctx;
+	client.ctx->sock_fd = -1;
 	client.event_cb = event_cb;
 
 	set_sm_state(ENGINE_INIT);
@@ -882,7 +919,7 @@ void lwm2m_rd_client_stop(struct lwm2m_ctx *client_ctx,
 static int lwm2m_rd_client_init(struct device *dev)
 {
 	return lwm2m_engine_add_service(lwm2m_rd_client_service,
-					STATE_MACHINE_UPDATE_INTERVAL);
+					STATE_MACHINE_UPDATE_INTERVAL_MS);
 }
 
 SYS_INIT(lwm2m_rd_client_init, APPLICATION,

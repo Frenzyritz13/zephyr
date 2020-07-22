@@ -32,22 +32,22 @@ enum {
 
 /** @brief This is a 'tentative' type and should be used as a pointer only */
 struct bt_uuid {
-	u8_t type;
+	uint8_t type;
 };
 
 struct bt_uuid_16 {
 	struct bt_uuid uuid;
-	u16_t val;
+	uint16_t val;
 };
 
 struct bt_uuid_32 {
 	struct bt_uuid uuid;
-	u32_t val;
+	uint32_t val;
 };
 
 struct bt_uuid_128 {
 	struct bt_uuid uuid;
-	u8_t val[16];
+	uint8_t val[16];
 };
 
 #define BT_UUID_INIT_16(value)		\
@@ -69,16 +69,15 @@ struct bt_uuid_128 {
 }
 
 #define BT_UUID_DECLARE_16(value) \
-	((struct bt_uuid *) (&(struct bt_uuid_16) BT_UUID_INIT_16(value)))
+	((struct bt_uuid *) ((struct bt_uuid_16[]) {BT_UUID_INIT_16(value)}))
 #define BT_UUID_DECLARE_32(value) \
-	((struct bt_uuid *) (&(struct bt_uuid_32) BT_UUID_INIT_32(value)))
+	((struct bt_uuid *) ((struct bt_uuid_32[]) {BT_UUID_INIT_32(value)}))
 #define BT_UUID_DECLARE_128(value...) \
-	((struct bt_uuid *) (&(struct bt_uuid_128) BT_UUID_INIT_128(value)))
+	((struct bt_uuid *) ((struct bt_uuid_128[]) {BT_UUID_INIT_128(value)}))
 
 #define BT_UUID_16(__u) CONTAINER_OF(__u, struct bt_uuid_16, uuid)
 #define BT_UUID_32(__u) CONTAINER_OF(__u, struct bt_uuid_32, uuid)
 #define BT_UUID_128(__u) CONTAINER_OF(__u, struct bt_uuid_128, uuid)
-
 
 /**
  * @brief Encode 128 bit UUID into an array values
@@ -124,6 +123,16 @@ struct bt_uuid_128 {
 	(((w32) >> 16) & 0xFF), \
 	(((w32) >> 24) & 0xFF)
 
+/** @def BT_UUID_STR_LEN
+ *
+ *  @brief Recommended length of user string buffer for Bluetooth UUID.
+ *
+ *  @details The recommended length guarantee the output of UUID
+ *  conversion will not lose valuable information about the UUID being
+ *  processed. If the length of the UUID is known the string can be shorter.
+ */
+#define BT_UUID_STR_LEN 37
+
 /** @def BT_UUID_GAP
  *  @brief Generic Access
  */
@@ -164,10 +173,18 @@ struct bt_uuid_128 {
  *  @brief Environmental Sensing Service
  */
 #define BT_UUID_ESS                       BT_UUID_DECLARE_16(0x181a)
+/** @def BT_UUID_BMS
+ *  @brief Bond Management Service
+ */
+#define BT_UUID_BMS                       BT_UUID_DECLARE_16(0x181e)
 /** @def BT_UUID_IPSS
  *  @brief IP Support Service
  */
 #define BT_UUID_IPSS                      BT_UUID_DECLARE_16(0x1820)
+/** @def BT_UUID_OTS
+ *  @brief Object Transfer Service
+ */
+#define BT_UUID_OTS                       BT_UUID_DECLARE_16(0x1825)
 /** @def BT_UUID_MESH_PROV
  *  @brief Mesh Provisioning Service
  */
@@ -440,10 +457,66 @@ struct bt_uuid_128 {
  *  @brief Barometric Pressure Trend Characteristic
  */
 #define BT_UUID_BAR_PRESSURE_TREND        BT_UUID_DECLARE_16(0x2aa3)
+/** @def BT_UUID_BMS_CONTROL_POINT
+ *  @brief Bond Management Control Point
+ */
+#define BT_UUID_BMS_CONTROL_POINT         BT_UUID_DECLARE_16(0x2aa4)
+/** @def BT_UUID_BMS_FEATURE
+ *  @brief Bond Management Feature
+ */
+#define BT_UUID_BMS_FEATURE               BT_UUID_DECLARE_16(0x2aa5)
 /** @def BT_UUID_CENTRAL_ADDR_RES
  *  @brief Central Address Resolution Characteristic
  */
 #define BT_UUID_CENTRAL_ADDR_RES          BT_UUID_DECLARE_16(0x2aa6)
+/** @def BT_UUID_OTS_FEATURE
+ *  @brief OTS Feature Characteristic
+ */
+#define BT_UUID_OTS_FEATURE               BT_UUID_DECLARE_16(0x2abd)
+/** @def BT_UUID_OTS_NAME
+ *  @brief OTS Object Name Characteristic
+ */
+#define BT_UUID_OTS_NAME                  BT_UUID_DECLARE_16(0x2abe)
+/** @def BT_UUID_OTS_TYPE
+ *  @brief OTS Object Type Characteristic
+ */
+#define BT_UUID_OTS_TYPE                  BT_UUID_DECLARE_16(0x2abf)
+/** @def BT_UUID_OTS_SIZE
+ *  @brief OTS Object Size Characteristic
+ */
+#define BT_UUID_OTS_SIZE                  BT_UUID_DECLARE_16(0x2ac0)
+/** @def BT_UUID_OTS_FIRST_CREATED
+ *  @brief OTS Object First-Created Characteristic
+ */
+#define BT_UUID_OTS_FIRST_CREATED         BT_UUID_DECLARE_16(0x2ac1)
+/** @def BT_UUID_OTS_LAST_MODIFIED
+ *  @brief OTS Object Last-Modified Characteristic
+ */
+#define BT_UUID_OTS_LAST_MODIFIED         BT_UUID_DECLARE_16(0x2ac2)
+/** @def BT_UUID_OTS_ID
+ *  @brief OTS Object ID Characteristic
+ */
+#define BT_UUID_OTS_ID                    BT_UUID_DECLARE_16(0x2ac3)
+/** @def BT_UUID_OTS_PROPERTIES
+ *  @brief OTS Object Properties Characteristic
+ */
+#define BT_UUID_OTS_PROPERTIES            BT_UUID_DECLARE_16(0x2ac4)
+/** @def BT_UUID_OTS_ACTION_CP
+ *  @brief OTS Object Action Control Point Characteristic
+ */
+#define BT_UUID_OTS_ACTION_CP             BT_UUID_DECLARE_16(0x2ac5)
+/** @def BT_UUID_OTS_LIST_CP
+ *  @brief OTS Object List Control Point Characteristic
+ */
+#define BT_UUID_OTS_LIST_CP               BT_UUID_DECLARE_16(0x2ac6)
+/** @def BT_UUID_OTS_LIST_FILTER
+ *  @brief OTS Object List Filter Characteristic
+ */
+#define BT_UUID_OTS_LIST_FILTER           BT_UUID_DECLARE_16(0x2ac7)
+/** @def BT_UUID_OTS_CHANGED
+ *  @brief OTS Object Changed Characteristic
+ */
+#define BT_UUID_OTS_CHANGED               BT_UUID_DECLARE_16(0x2ac8)
 /** @def BT_UUID_MESH_PROV_DATA_IN
  *  @brief Mesh Provisioning Data In
  */
@@ -468,6 +541,10 @@ struct bt_uuid_128 {
  *  @brief Database Hash
  */
 #define BT_UUID_GATT_DB_HASH              BT_UUID_DECLARE_16(0x2b2a)
+/** @def BT_UUID_GATT_SERVER_FEATURES
+ *  @brief Server Supported Features
+ */
+#define BT_UUID_GATT_SERVER_FEATURES      BT_UUID_DECLARE_16(0x2b3a)
 
 /*
  * Protocol UUIDs
@@ -522,13 +599,12 @@ int bt_uuid_cmp(const struct bt_uuid *u1, const struct bt_uuid *u2);
  *
  *  @return true if the data was valid and the UUID was successfully created.
  */
-bool bt_uuid_create(struct bt_uuid *uuid, const u8_t *data, u8_t data_len);
+bool bt_uuid_create(struct bt_uuid *uuid, const uint8_t *data, uint8_t data_len);
 
-#if defined(CONFIG_BT_DEBUG)
 /** @brief Convert Bluetooth UUID to string.
  *
- *  Converts Bluetooth UUID to string. UUID has to be in 16 bits or 128 bits
- *  format.
+ *  Converts Bluetooth UUID to string.
+ *  UUID can be in any format, 16-bit, 32-bit or 128-bit.
  *
  *  @param uuid Bluetooth UUID
  *  @param str pointer where to put converted string
@@ -537,34 +613,6 @@ bool bt_uuid_create(struct bt_uuid *uuid, const u8_t *data, u8_t data_len);
  *  @return N/A
  */
 void bt_uuid_to_str(const struct bt_uuid *uuid, char *str, size_t len);
-
-const char *bt_uuid_str_real(const struct bt_uuid *uuid);
-
-/** @def bt_uuid_str
- *  @brief Convert Bluetooth UUID to string in place.
- *
- *  Converts Bluetooth UUID to string in place. UUID has to be in 16 bits or
- *  128 bits format.
- *
- *  @param uuid Bluetooth UUID
- *
- *  @return String representation of the UUID given
- */
-#define bt_uuid_str(_uuid) log_strdup(bt_uuid_str_real(_uuid))
-#else
-static inline void bt_uuid_to_str(const struct bt_uuid *uuid, char *str,
-				  size_t len)
-{
-	if (len > 0) {
-		str[0] = '\0';
-	}
-}
-
-static inline const char *bt_uuid_str(const struct bt_uuid *uuid)
-{
-	return "";
-}
-#endif /* CONFIG_BT_DEBUG */
 
 #ifdef __cplusplus
 }

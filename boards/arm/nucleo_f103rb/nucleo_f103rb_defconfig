@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 
-CONFIG_ARM=y
-CONFIG_BOARD_NUCLEO_F103RB=y
 CONFIG_SOC_SERIES_STM32F1X=y
 CONFIG_SOC_STM32F103XB=y
 # 72MHz system clock
@@ -30,7 +28,6 @@ CONFIG_CLOCK_STM32_PLL_SRC_HSE=y
 # the 8MHz clock signal coming from integrated STLink
 CONFIG_CLOCK_STM32_HSE_BYPASS=y
 # produce 72MHz clock at PLL output
-CONFIG_CLOCK_STM32_PLL_XTPRE=n
 CONFIG_CLOCK_STM32_PLL_MULTIPLIER=9
 CONFIG_CLOCK_STM32_AHB_PRESCALER=1
 # APB1 clock must not to exceed 36MHz limit

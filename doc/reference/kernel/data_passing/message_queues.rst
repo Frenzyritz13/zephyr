@@ -70,7 +70,7 @@ Implementation
 Defining a Message Queue
 ========================
 
-A message queue is defined using a variable of type :c:type:`struct k_msgq`.
+A message queue is defined using a variable of type :c:type:`k_msgq`.
 It must then be initialized by calling :cpp:func:`k_msgq_init()`.
 
 The following code defines and initializes an empty message queue
@@ -79,9 +79,9 @@ that is capable of holding 10 items, each of which is 12 bytes long.
 .. code-block:: c
 
     struct data_item_type {
-        u32_t field1;
-	u32_t field2;
-	u32_t field3;
+        uint32_t field1;
+	uint32_t field2;
+	uint32_t field3;
     };
 
     char __aligned(4) my_msgq_buffer[10 * sizeof(data_item_type)];

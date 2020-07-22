@@ -1,10 +1,7 @@
-# Kconfig - CAN configuration options
+# CAN configuration options
 
-#
 # Copyright (c) 2018 Alexander Wachter
-#
 # SPDX-License-Identifier: Apache-2.0
-#
 
 #
 # CAN options
@@ -22,6 +19,7 @@ source "subsys/logging/Kconfig.template.log_config"
 
 config CAN_SHELL
 	bool "Enable CAN Shell"
+	default y
 	depends on SHELL
 	help
 	  Enable CAN Shell for testing.
@@ -58,16 +56,6 @@ config CAN_AUTO_BUS_OFF_RECOVERY
 	  ISO 11898-1 (recovery after 128 occurrences of 11 consecutive
 	  recessive bits). When this option is enabled, the recovery API is not
 	  available.
-
-config CAN_0
-	bool "Enable CAN 0"
-	help
-	  Enable CAN controller 0
-
-config CAN_1
-	bool "Enable CAN 1"
-	help
-	  Enable CAN controller 1
 
 source "drivers/can/Kconfig.stm32"
 source "drivers/can/Kconfig.mcux"

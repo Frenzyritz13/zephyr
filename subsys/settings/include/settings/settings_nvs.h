@@ -8,7 +8,7 @@
 #ifndef __SETTINGS_NVS_H_
 #define __SETTINGS_NVS_H_
 
-#include <nvs/nvs.h>
+#include <fs/nvs.h>
 #include "settings/settings.h"
 
 #ifdef __cplusplus
@@ -36,7 +36,7 @@ extern "C" {
 struct settings_nvs {
 	struct settings_store cf_store;
 	struct nvs_fs cf_nvs;
-	u16_t last_name_id;
+	uint16_t last_name_id;
 	const char *flash_dev_name;
 };
 

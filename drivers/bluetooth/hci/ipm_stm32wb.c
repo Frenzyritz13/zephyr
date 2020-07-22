@@ -9,9 +9,9 @@
 
 #include <init.h>
 #include <sys/util.h>
-
 #include <bluetooth/hci.h>
-#include <bluetooth/hci_driver.h>
+#include <drivers/bluetooth/hci_driver.h>
+#include "bluetooth/addr.h"
 
 #include "app_conf.h"
 #include "stm32_wpan_common.h"
@@ -23,13 +23,13 @@
 
 /* Private variables ---------------------------------------------------------*/
 PLACE_IN_SECTION("MB_MEM1") ALIGN(4) static TL_CmdPacket_t BleCmdBuffer;
-PLACE_IN_SECTION("MB_MEM2") ALIGN(4) static u8_t EvtPool[POOL_SIZE];
+PLACE_IN_SECTION("MB_MEM2") ALIGN(4) static uint8_t EvtPool[POOL_SIZE];
 PLACE_IN_SECTION("MB_MEM2") ALIGN(4) static TL_CmdPacket_t SystemCmdBuffer;
-PLACE_IN_SECTION("MB_MEM2") ALIGN(4) static u8_t
+PLACE_IN_SECTION("MB_MEM2") ALIGN(4) static uint8_t
 	SystemSpareEvtBuffer[sizeof(TL_PacketHeader_t) + TL_EVT_HDR_SIZE + 255];
-PLACE_IN_SECTION("MB_MEM2") ALIGN(4) static u8_t
+PLACE_IN_SECTION("MB_MEM2") ALIGN(4) static uint8_t
 	BleSpareEvtBuffer[sizeof(TL_PacketHeader_t) + TL_EVT_HDR_SIZE + 255];
-PLACE_IN_SECTION("MB_MEM2") ALIGN(4) static u8_t
+PLACE_IN_SECTION("MB_MEM2") ALIGN(4) static uint8_t
 	HciAclDataBuffer[sizeof(TL_PacketHeader_t) + 5 + 251];
 
 static void syscmd_status_not(SHCI_TL_CmdStatus_t status);
@@ -50,11 +50,28 @@ static K_SEM_DEFINE(acl_data_ack, 1, 1);
 static K_SEM_DEFINE(ipm_busy, 1, 1);
 
 struct aci_set_tx_power {
-	u8_t cmd;
-	u8_t value[2];
+	uint8_t cmd;
+	uint8_t value[2];
 };
 
+struct aci_set_ble_addr {
+	uint8_t config_offset;
+	uint8_t length;
+	uint8_t value[6];
+} __packed;
+
 #define ACI_WRITE_SET_TX_POWER_LEVEL       BT_OP(BT_OGF_VS, 0xFC0F)
+#define ACI_HAL_WRITE_CONFIG_DATA	   BT_OP(BT_OGF_VS, 0xFC0C)
+
+#define HCI_CONFIG_DATA_PUBADDR_OFFSET		0
+#define HCI_CONFIG_DATA_RANDOM_ADDRESS_OFFSET	0x2E
+
+static bt_addr_t bd_addr_udn;
+
+/* Rx thread definitions */
+K_FIFO_DEFINE(ipm_rx_events_fifo);
+static K_THREAD_STACK_DEFINE(ipm_rx_stack, CONFIG_BT_STM32_IPM_RX_STACK_SIZE);
+static struct k_thread ipm_rx_thread_data;
 
 static void stm32wb_start_ble(void)
 {
@@ -116,7 +133,7 @@ static void tryfix_event(TL_Evt_t *tev)
 	}
 
 	struct bt_hci_evt_le_enh_conn_complete *evt =
-			(void *)((u8_t *)mev + (sizeof(*mev)));
+			(void *)((uint8_t *)mev + (sizeof(*mev)));
 
 	if (!bt_addr_cmp(&evt->peer_addr.a, BT_ADDR_NONE)) {
 		BT_WARN("Invalid peer addr %s", bt_addr_le_str(&evt->peer_addr));
@@ -127,57 +144,66 @@ static void tryfix_event(TL_Evt_t *tev)
 
 void TM_EvtReceivedCb(TL_EvtPacket_t *hcievt)
 {
-	struct net_buf *buf;
-	struct bt_hci_acl_hdr acl_hdr;
-	TL_AclDataSerial_t *acl;
+	k_fifo_put(&ipm_rx_events_fifo, hcievt);
+}
 
-	k_sem_take(&ipm_busy, K_NO_WAIT);
+static void bt_ipm_rx_thread(void)
+{
+	while (true) {
+		static TL_EvtPacket_t *hcievt;
+		struct net_buf *buf = NULL;
+		struct bt_hci_acl_hdr acl_hdr;
+		TL_AclDataSerial_t *acl;
 
-	switch (hcievt->evtserial.type) {
-	case HCI_EVT:
-		BT_DBG("EVT: hcievt->evtserial.evt.evtcode: 0x%02x",
-		       hcievt->evtserial.evt.evtcode);
-		switch (hcievt->evtserial.evt.evtcode) {
-		case BT_HCI_EVT_VENDOR:
-			/* Vendor events are currently unsupported */
-			BT_ERR("Unknown evtcode type 0x%02x",
+		hcievt = k_fifo_get(&ipm_rx_events_fifo, K_FOREVER);
+
+		k_sem_take(&ipm_busy, K_FOREVER);
+
+		switch (hcievt->evtserial.type) {
+		case HCI_EVT:
+			BT_DBG("EVT: hcievt->evtserial.evt.evtcode: 0x%02x",
 			       hcievt->evtserial.evt.evtcode);
-			goto out;
-		default:
-			buf = bt_buf_get_evt(hcievt->evtserial.evt.evtcode, false,
-					     K_FOREVER);
+			switch (hcievt->evtserial.evt.evtcode) {
+			case BT_HCI_EVT_VENDOR:
+				/* Vendor events are currently unsupported */
+				BT_ERR("Unknown evtcode type 0x%02x",
+				       hcievt->evtserial.evt.evtcode);
+				TL_MM_EvtDone(hcievt);
+				goto end_loop;
+			default:
+				buf = bt_buf_get_evt(
+					hcievt->evtserial.evt.evtcode,
+					false, K_FOREVER);
+			}
+			tryfix_event(&hcievt->evtserial.evt);
+			net_buf_add_mem(buf, &hcievt->evtserial.evt,
+					hcievt->evtserial.evt.plen + 2);
 			break;
+		case HCI_ACL:
+			acl = &(((TL_AclDataPacket_t *)hcievt)->AclDataSerial);
+			buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_FOREVER);
+			acl_hdr.handle = acl->handle;
+			acl_hdr.len = acl->length;
+			BT_DBG("ACL: handle %x, len %x",
+			       acl_hdr.handle, acl_hdr.len);
+			net_buf_add_mem(buf, &acl_hdr, sizeof(acl_hdr));
+			net_buf_add_mem(buf, (uint8_t *)&acl->acl_data,
+					acl_hdr.len);
+			break;
+		default:
+			BT_ERR("Unknown BT buf type %d",
+			       hcievt->evtserial.type);
+			TL_MM_EvtDone(hcievt);
+			goto end_loop;
 		}
-		tryfix_event(&hcievt->evtserial.evt);
-		net_buf_add_mem(buf, &hcievt->evtserial.evt,
-				hcievt->evtserial.evt.plen + 2);
-		break;
-	case HCI_ACL:
-		acl = &(((TL_AclDataPacket_t *)hcievt)->AclDataSerial);
-		buf = bt_buf_get_rx(BT_BUF_ACL_IN, K_FOREVER);
-		acl_hdr.handle = acl->handle;
-		acl_hdr.len = acl->length;
-		BT_DBG("ACL: handle %x, len %x", acl_hdr.handle, acl_hdr.len);
-		net_buf_add_mem(buf, &acl_hdr, sizeof(acl_hdr));
-		net_buf_add_mem(buf, (u8_t *)&acl->acl_data, acl_hdr.len);
-		break;
-	default:
-		BT_ERR("Unknown BT buf type %d", hcievt->evtserial.type);
+
 		TL_MM_EvtDone(hcievt);
-		goto out;
-	}
 
-	TL_MM_EvtDone(hcievt);
-
-	if (hcievt->evtserial.type == HCI_EVT &&
-	    bt_hci_evt_is_prio(hcievt->evtserial.evt.evtcode)) {
-		bt_recv_prio(buf);
-	} else {
 		bt_recv(buf);
+end_loop:
+		k_sem_give(&ipm_busy);
 	}
 
-out:
-	k_sem_give(&ipm_busy);
 }
 
 static void TM_AclDataAck(void)
@@ -197,7 +223,7 @@ void shci_cmd_resp_release(uint32_t flag)
 
 void shci_cmd_resp_wait(uint32_t timeout)
 {
-	k_sem_take(&ble_sys_wait_cmd_rsp, timeout);
+	k_sem_take(&ble_sys_wait_cmd_rsp, K_MSEC(timeout));
 }
 
 void ipcc_reset(void)
@@ -257,7 +283,7 @@ void transport_init(void)
 	TL_Init();
 
 	/**< System channel initialization */
-	shci_init_config.p_cmdbuffer = (u8_t *)&SystemCmdBuffer;
+	shci_init_config.p_cmdbuffer = (uint8_t *)&SystemCmdBuffer;
 	shci_init_config.StatusNotCallBack = syscmd_status_not;
 	shci_init(sysevt_received, (void *) &shci_init_config);
 
@@ -269,7 +295,7 @@ void transport_init(void)
 	TL_MM_Init(&tl_mm_config);
 
 	/**< BLE channel initialization */
-	tl_ble_config.p_cmdbuffer = (u8_t *)&BleCmdBuffer;
+	tl_ble_config.p_cmdbuffer = (uint8_t *)&BleCmdBuffer;
 	tl_ble_config.p_AclDataBuffer = HciAclDataBuffer;
 	tl_ble_config.IoBusEvtCallBack = TM_EvtReceivedCb;
 	tl_ble_config.IoBusAclDataTxAck = TM_AclDataAck;
@@ -357,6 +383,73 @@ static void start_ble_rf(void)
 	LL_RCC_SetCLK48ClockSource(LL_RCC_CLK48_CLKSOURCE_HSI48);
 }
 
+bt_addr_t *bt_get_ble_addr(void)
+{
+	bt_addr_t *bd_addr;
+	uint32_t udn;
+	uint32_t company_id;
+	uint32_t device_id;
+
+	/* Get the 64 bit Unique Device Number UID */
+	/* The UID is used by firmware to derive   */
+	/* 48-bit Device Address EUI-48 */
+	udn = LL_FLASH_GetUDN();
+
+	if (udn != 0xFFFFFFFF) {
+		/* Get the ST Company ID */
+		company_id = LL_FLASH_GetSTCompanyID();
+		/* Get the STM32 Device ID */
+		device_id = LL_FLASH_GetDeviceID();
+		bd_addr_udn.val[0] = (uint8_t)(udn & 0x000000FF);
+		bd_addr_udn.val[1] = (uint8_t)((udn & 0x0000FF00) >> 8);
+		bd_addr_udn.val[2] = (uint8_t)((udn & 0x00FF0000) >> 16);
+		bd_addr_udn.val[3] = (uint8_t)device_id;
+		bd_addr_udn.val[4] = (uint8_t)(company_id & 0x000000FF);
+		bd_addr_udn.val[5] = (uint8_t)((company_id & 0x0000FF00) >> 8);
+		bd_addr = &bd_addr_udn;
+	} else {
+		bd_addr = NULL;
+	}
+
+	return bd_addr;
+}
+
+static int bt_ipm_set_addr(void)
+{
+	bt_addr_t *uid_addr;
+	struct aci_set_ble_addr *param;
+	struct net_buf *buf, *rsp;
+	int err;
+
+	uid_addr = bt_get_ble_addr();
+	if (!uid_addr) {
+		return -ENOMSG;
+	}
+
+	buf = bt_hci_cmd_create(ACI_HAL_WRITE_CONFIG_DATA, sizeof(*param));
+
+	if (!buf) {
+		return -ENOBUFS;
+	}
+
+	param = net_buf_add(buf, sizeof(*param));
+	param->config_offset = HCI_CONFIG_DATA_PUBADDR_OFFSET;
+	param->length = 6;
+	param->value[0] = uid_addr->val[0];
+	param->value[1] = uid_addr->val[1];
+	param->value[2] = uid_addr->val[2];
+	param->value[3] = uid_addr->val[3];
+	param->value[4] = uid_addr->val[4];
+	param->value[5] = uid_addr->val[5];
+
+	err = bt_hci_cmd_send_sync(ACI_HAL_WRITE_CONFIG_DATA, buf, &rsp);
+	if (err) {
+		return err;
+	}
+	net_buf_unref(rsp);
+	return 0;
+}
+
 static int bt_ipm_ble_init(void)
 {
 	struct aci_set_tx_power *param;
@@ -370,7 +463,10 @@ static int bt_ipm_ble_init(void)
 	}
 	/* TDB: Something to do on reset complete? */
 	net_buf_unref(rsp);
-
+	err = bt_ipm_set_addr();
+	if (err) {
+		BT_ERR("Can't set BLE UID addr");
+	}
 	/* Send ACI_WRITE_SET_TX_POWER_LEVEL */
 	buf = bt_hci_cmd_create(ACI_WRITE_SET_TX_POWER_LEVEL, 3);
 	if (!buf) {
@@ -393,6 +489,13 @@ static int bt_ipm_ble_init(void)
 static int bt_ipm_open(void)
 {
 	int err;
+
+	/* Start RX thread */
+	k_thread_create(&ipm_rx_thread_data, ipm_rx_stack,
+			K_THREAD_STACK_SIZEOF(ipm_rx_stack),
+			(k_thread_entry_t)bt_ipm_rx_thread, NULL, NULL, NULL,
+			K_PRIO_COOP(CONFIG_BT_RX_PRIO - 1),
+			0, K_NO_WAIT);
 
 	/* Take BLE out of reset */
 	ipcc_reset();

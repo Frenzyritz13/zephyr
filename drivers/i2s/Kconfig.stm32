@@ -1,9 +1,7 @@
-# Kconfig - STM32 I2S driver configuration options
-#
+# STM32 I2S driver configuration options
+
 # Copyright (c) 2018 STMicroelectronics
-#
 # SPDX-License-Identifier: Apache-2.0
-#
 
 menuconfig I2S_STM32
 	bool "STM32 MCU I2S controller driver"
@@ -62,30 +60,5 @@ config I2S_STM32_PLLI2S_PLLR
 	  PLLR factor should be selected to ensure that the I2S clock
 	  frequency is less than or equal to 192MHz.
 	  Allowed values: 2-7
-
-config I2S_1
-	bool "I2S port 1"
-	help
-	  Enable I2S controller port 1.
-
-config I2S_2
-	bool "I2S port 2"
-	help
-	  Enable I2S controller port 2.
-
-config I2S_3
-	bool "I2S port 3"
-	help
-	  Enable I2S controller port 3.
-
-config I2S_4
-	bool "I2S port 4"
-	help
-	  Enable I2S controller port 4.
-
-config I2S_5
-	bool "I2S port 5"
-	help
-	  Enable I2S controller port 5.
 
 endif # I2S_STM32

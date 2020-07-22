@@ -28,17 +28,17 @@
 #define OS_GET_TIME() k_cycle_get_32()
 
 /* time necessary to read the time */
-extern u32_t tm_off;
+extern uint32_t tm_off;
 
-static inline u32_t TIME_STAMP_DELTA_GET(u32_t ts)
+static inline uint32_t TIME_STAMP_DELTA_GET(uint32_t ts)
 {
-	u32_t t;
+	uint32_t t;
 
 	/* serialize so OS_GET_TIME() is not reordered */
 	timestamp_serialize();
 
 	t = OS_GET_TIME();
-	u32_t res = (t >= ts) ? (t - ts) : (ULONG_MAX - ts + t);
+	uint32_t res = (t >= ts) ? (t - ts) : (ULONG_MAX - ts + t);
 
 	if (ts > 0) {
 		res -= tm_off;
@@ -52,14 +52,14 @@ static inline u32_t TIME_STAMP_DELTA_GET(u32_t ts)
  */
 static inline void bench_test_init(void)
 {
-	u32_t t = OS_GET_TIME();
+	uint32_t t = OS_GET_TIME();
 
 	tm_off = OS_GET_TIME() - t;
 }
 
 
 /* timestamp for checks */
-static s64_t tCheck;
+static int64_t tCheck;
 
 /*
  * Routines are invoked before and after the benchmark and check
@@ -104,7 +104,7 @@ static inline int high_timer_overflow(void)
 	/* Check if the time elapsed in msec is sufficient to trigger an
 	 *  overflow of the high precision timer
 	 */
-	if (tCheck >= (SYS_CLOCK_HW_CYCLES_TO_NS64(UINT_MAX) /
+	if (tCheck >= (k_cyc_to_ns_floor64(UINT_MAX) /
 				(NSEC_PER_USEC * USEC_PER_MSEC))) {
 		return -1;
 	}

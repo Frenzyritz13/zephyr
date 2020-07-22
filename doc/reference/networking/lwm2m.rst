@@ -216,7 +216,7 @@ Example LwM2M object and resources: Device
      - R
      - Multiple
      - Optional
-     - ObjLink
+     - ObjLnk
 
 The server could query the ``Manufacturer`` resource for ``Device`` object
 instance 0 (the default and only instance) by sending a ``READ 3/0/0``
@@ -247,7 +247,7 @@ Sample usage
 ************
 
 To use the LwM2M library, start by creating an LwM2M client context
-:c:type:`struct lwm2m_ctx` structure:
+:c:type:`lwm2m_ctx` structure:
 
 .. code-block:: c
 
@@ -259,7 +259,7 @@ for:
 
 .. code-block:: c
 
-	static int device_reboot_cb(u16_t obj_inst_id)
+	static int device_reboot_cb(uint16_t obj_inst_id)
 	{
 		LOG_INF("Device rebooting.");
 		LOG_PANIC();

@@ -19,13 +19,14 @@
 #include <zephyr.h>
 #include <sys/ring_buffer.h>
 
+#include <usb/usb_device.h>
 #include <logging/log.h>
 LOG_MODULE_REGISTER(cdc_acm_composite, LOG_LEVEL_INF);
 
 #define RING_BUF_SIZE	(64 * 2)
 
-u8_t buffer0[RING_BUF_SIZE];
-u8_t buffer1[RING_BUF_SIZE];
+uint8_t buffer0[RING_BUF_SIZE];
+uint8_t buffer1[RING_BUF_SIZE];
 
 static struct serial_data {
 	struct device *dev;
@@ -46,7 +47,7 @@ static void interrupt_handler(void *user_data)
 		LOG_DBG("dev %p dev_data %p", dev, dev_data);
 
 		if (uart_irq_rx_ready(dev)) {
-			u8_t buf[64];
+			uint8_t buf[64];
 			size_t read, wrote;
 			struct ring_buf *ringbuf =
 					&dev_data->peer_data->ringbuf;
@@ -66,7 +67,7 @@ static void interrupt_handler(void *user_data)
 		}
 
 		if (uart_irq_tx_ready(dev)) {
-			u8_t buf[64];
+			uint8_t buf[64];
 			size_t wrote, len;
 
 			len = ring_buf_get(&dev_data->ringbuf, buf,
@@ -84,16 +85,16 @@ static void interrupt_handler(void *user_data)
 
 static void uart_line_set(struct device *dev)
 {
-	u32_t baudrate;
+	uint32_t baudrate;
 	int ret;
 
 	/* They are optional, we use them to test the interrupt endpoint */
-	ret = uart_line_ctrl_set(dev, LINE_CTRL_DCD, 1);
+	ret = uart_line_ctrl_set(dev, UART_LINE_CTRL_DCD, 1);
 	if (ret) {
 		LOG_DBG("Failed to set DCD, ret code %d", ret);
 	}
 
-	ret = uart_line_ctrl_set(dev, LINE_CTRL_DSR, 1);
+	ret = uart_line_ctrl_set(dev, UART_LINE_CTRL_DSR, 1);
 	if (ret) {
 		LOG_DBG("Failed to set DSR, ret code %d", ret);
 	}
@@ -101,7 +102,7 @@ static void uart_line_set(struct device *dev)
 	/* Wait 1 sec for the host to do all settings */
 	k_busy_wait(1000000);
 
-	ret = uart_line_ctrl_get(dev, LINE_CTRL_BAUD_RATE, &baudrate);
+	ret = uart_line_ctrl_get(dev, UART_LINE_CTRL_BAUD_RATE, &baudrate);
 	if (ret) {
 		LOG_DBG("Failed to get baudrate, ret code %d", ret);
 	} else {
@@ -111,10 +112,12 @@ static void uart_line_set(struct device *dev)
 
 void main(void)
 {
+	int ret;
+
 	struct serial_data *dev_data0 = &peers[0];
 	struct serial_data *dev_data1 = &peers[1];
 	struct device *dev0, *dev1;
-	u32_t dtr = 0U;
+	uint32_t dtr = 0U;
 
 	dev0 = device_get_binding("CDC_ACM_0");
 	if (!dev0) {
@@ -128,10 +131,16 @@ void main(void)
 		return;
 	}
 
+	ret = usb_enable(NULL);
+	if (ret != 0) {
+		LOG_ERR("Failed to enable USB");
+		return;
+	}
+
 	LOG_INF("Wait for DTR");
 
 	while (1) {
-		uart_line_ctrl_get(dev0, LINE_CTRL_DTR, &dtr);
+		uart_line_ctrl_get(dev0, UART_LINE_CTRL_DTR, &dtr);
 		if (dtr) {
 			break;
 		}
@@ -140,7 +149,7 @@ void main(void)
 	}
 
 	while (1) {
-		uart_line_ctrl_get(dev1, LINE_CTRL_DTR, &dtr);
+		uart_line_ctrl_get(dev1, UART_LINE_CTRL_DTR, &dtr);
 		if (dtr) {
 			break;
 		}

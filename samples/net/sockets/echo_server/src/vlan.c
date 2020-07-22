@@ -43,7 +43,7 @@ static void iface_cb(struct net_if *iface, void *user_data)
 }
 
 static int setup_iface(struct net_if *iface, const char *ipv6_addr,
-		       const char *ipv4_addr, u16_t vlan_tag)
+		       const char *ipv4_addr, uint16_t vlan_tag)
 {
 	struct net_if_addr *ifaddr;
 	struct in_addr addr4;
@@ -55,26 +55,34 @@ static int setup_iface(struct net_if *iface, const char *ipv6_addr,
 		LOG_ERR("Cannot enable VLAN for tag %d (%d)", vlan_tag, ret);
 	}
 
-	if (net_addr_pton(AF_INET6, ipv6_addr, &addr6)) {
-		LOG_ERR("Invalid address: %s", ipv6_addr);
-		return -EINVAL;
+	if (IS_ENABLED(CONFIG_NET_IPV6)) {
+		if (net_addr_pton(AF_INET6, ipv6_addr, &addr6)) {
+			LOG_ERR("Invalid address: %s", ipv6_addr);
+			return -EINVAL;
+		}
+
+		ifaddr = net_if_ipv6_addr_add(iface, &addr6,
+					      NET_ADDR_MANUAL, 0);
+		if (!ifaddr) {
+			LOG_ERR("Cannot add %s to interface %p",
+				ipv6_addr, iface);
+			return -EINVAL;
+		}
 	}
 
-	ifaddr = net_if_ipv6_addr_add(iface, &addr6, NET_ADDR_MANUAL, 0);
-	if (!ifaddr) {
-		LOG_ERR("Cannot add %s to interface %p", ipv6_addr, iface);
-		return -EINVAL;
-	}
+	if (IS_ENABLED(CONFIG_NET_IPV4)) {
+		if (net_addr_pton(AF_INET, ipv4_addr, &addr4)) {
+			LOG_ERR("Invalid address: %s", ipv6_addr);
+			return -EINVAL;
+		}
 
-	if (net_addr_pton(AF_INET, ipv4_addr, &addr4)) {
-		LOG_ERR("Invalid address: %s", ipv6_addr);
-		return -EINVAL;
-	}
-
-	ifaddr = net_if_ipv4_addr_add(iface, &addr4, NET_ADDR_MANUAL, 0);
-	if (!ifaddr) {
-		LOG_ERR("Cannot add %s to interface %p", ipv4_addr, iface);
-		return -EINVAL;
+		ifaddr = net_if_ipv4_addr_add(iface, &addr4,
+					      NET_ADDR_MANUAL, 0);
+		if (!ifaddr) {
+			LOG_ERR("Cannot add %s to interface %p",
+				ipv4_addr, iface);
+			return -EINVAL;
+		}
 	}
 
 	LOG_DBG("Interface %p VLAN tag %d setup done.", iface, vlan_tag);

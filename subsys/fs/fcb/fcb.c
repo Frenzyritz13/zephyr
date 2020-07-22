@@ -13,10 +13,10 @@
 #include "string.h"
 #include <errno.h>
 
-u8_t
+uint8_t
 fcb_get_align(const struct fcb *fcb)
 {
-	u8_t align;
+	uint8_t align;
 
 	if (fcb->fap == NULL) {
 		return 0;
@@ -95,7 +95,7 @@ fcb_init(int f_area_id, struct fcb *fcb)
 	struct flash_sector *sector;
 	int rc;
 	int i;
-	u8_t align;
+	uint8_t align;
 	int oldest = -1, newest = -1;
 	struct flash_sector *oldest_sector = NULL, *newest_sector = NULL;
 	struct fcb_disk_area fda;
@@ -196,7 +196,7 @@ fcb_is_empty(struct fcb *fcb)
  * 1 byte for lengths < 128 bytes, and 2 bytes for < 16384.
  */
 int
-fcb_put_len(u8_t *buf, u16_t len)
+fcb_put_len(uint8_t *buf, uint16_t len)
 {
 	if (len < 0x80) {
 		buf[0] = len;
@@ -211,7 +211,7 @@ fcb_put_len(u8_t *buf, u16_t len)
 }
 
 int
-fcb_get_len(u8_t *buf, u16_t *len)
+fcb_get_len(uint8_t *buf, uint16_t *len)
 {
 	int rc;
 
@@ -232,7 +232,7 @@ fcb_get_len(u8_t *buf, u16_t *len)
  * Initialize erased sector for use.
  */
 int
-fcb_sector_hdr_init(struct fcb *fcb, struct flash_sector *sector, u16_t id)
+fcb_sector_hdr_init(struct fcb *fcb, struct flash_sector *sector, uint16_t id)
 {
 	struct fcb_disk_area fda;
 	int rc;
@@ -285,11 +285,12 @@ int fcb_sector_hdr_read(struct fcb *fcb, struct flash_sector *sector,
  * @return 0 on there are any fcbs aviable; -ENOENT otherwise
  */
 int
-fcb_offset_last_n(struct fcb *fcb, u8_t entries,
+fcb_offset_last_n(struct fcb *fcb, uint8_t entries,
 		struct fcb_entry *last_n_entry)
 {
 	struct fcb_entry loc;
 	int i;
+	int rc;
 
 	/* assure a minimum amount of entries */
 	if (!entries) {
@@ -305,7 +306,14 @@ fcb_offset_last_n(struct fcb *fcb, u8_t entries,
 		}
 		/* Update last_n_entry after n entries and keep updating */
 		else if (i > (entries - 1)) {
-			fcb_getnext(fcb, last_n_entry);
+			rc = fcb_getnext(fcb, last_n_entry);
+
+			if (rc) {
+				/* A fcb history must have been erased,
+				 * wanted entry doesn't exist anymore.
+				 */
+				return -ENOENT;
+			}
 		}
 		i++;
 	}

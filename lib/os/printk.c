@@ -30,13 +30,23 @@ enum pad_type {
 	PAD_SPACE_AFTER,
 };
 
-static void _printk_dec_ulong(out_func_t out, void *ctx,
-			      const unsigned long num, enum pad_type padding,
-			      int min_width);
-static void _printk_hex_ulong(out_func_t out, void *ctx,
-			      const unsigned long long num, enum pad_type padding,
-			      int min_width);
+#ifdef CONFIG_PRINTK64
+typedef uint64_t printk_val_t;
+#else
+typedef uint32_t printk_val_t;
+#endif
 
+/* Maximum number of digits in a printed decimal value (hex is always
+ * less, obviously).  Funny formula produces 10 max digits for 32 bit,
+ * 21 for 64.
+ */
+#define DIGITS_BUFLEN (11 * (sizeof(printk_val_t) / 4) - 1)
+
+#ifdef CONFIG_PRINTK_SYNC
+static struct k_spinlock lock;
+#endif
+
+#ifdef CONFIG_PRINTK
 /**
  * @brief Default character output routine that does nothing
  * @param c Character to swallow
@@ -47,7 +57,7 @@ static void _printk_hex_ulong(out_func_t out, void *ctx,
  * @return 0
  */
 /* LCOV_EXCL_START */
- __attribute__((weak)) int z_arch_printk_char_out(int c)
+__attribute__((weak)) int arch_printk_char_out(int c)
 {
 	ARG_UNUSED(c);
 
@@ -56,7 +66,7 @@ static void _printk_hex_ulong(out_func_t out, void *ctx,
 }
 /* LCOV_EXCL_STOP */
 
-int (*_char_out)(int) = z_arch_printk_char_out;
+int (*_char_out)(int) = arch_printk_char_out;
 
 /**
  * @brief Install the character output routine for printk
@@ -84,12 +94,69 @@ void *__printk_get_hook(void)
 {
 	return _char_out;
 }
+#endif /* CONFIG_PRINTK */
 
-static void print_err(out_func_t out, void *ctx)
+static void print_digits(out_func_t out, void *ctx, printk_val_t num, int base,
+			 bool pad_before, char pad_char, int min_width)
 {
-	out('E', ctx);
-	out('R', ctx);
-	out('R', ctx);
+	char buf[DIGITS_BUFLEN];
+	int i;
+
+	/* Print it backwards into the end of the buffer, low digits first */
+	for (i = DIGITS_BUFLEN - 1; num != 0; i--) {
+		buf[i] = "0123456789abcdef"[num % base];
+		num /= base;
+	}
+
+	if (i == DIGITS_BUFLEN - 1) {
+		buf[i] = '0';
+	} else {
+		i++;
+	}
+
+	int pad = MAX(min_width - (DIGITS_BUFLEN - i), 0);
+
+	for (/**/; pad > 0 && pad_before; pad--) {
+		out(pad_char, ctx);
+	}
+	for (/**/; i < DIGITS_BUFLEN; i++) {
+		out(buf[i], ctx);
+	}
+	for (/**/; pad > 0; pad--) {
+		out(pad_char, ctx);
+	}
+}
+
+static void print_hex(out_func_t out, void *ctx, printk_val_t num,
+		      enum pad_type padding, int min_width)
+{
+	print_digits(out, ctx, num, 16, padding != PAD_SPACE_AFTER,
+		     padding == PAD_ZERO_BEFORE ? '0' : ' ', min_width);
+}
+
+static void print_dec(out_func_t out, void *ctx, printk_val_t num,
+		      enum pad_type padding, int min_width)
+{
+	print_digits(out, ctx, num, 10, padding != PAD_SPACE_AFTER,
+		     padding == PAD_ZERO_BEFORE ? '0' : ' ', min_width);
+}
+
+static bool ok64(out_func_t out, void *ctx, long long val)
+{
+	if (sizeof(printk_val_t) < 8 && val != (long) val) {
+		out('E', ctx);
+		out('R', ctx);
+		out('R', ctx);
+		return false;
+	}
+	return true;
+}
+
+static bool negative(printk_val_t val)
+{
+	const printk_val_t hibit = ~(((printk_val_t) ~1) >> 1);
+
+	return (val & hibit) != 0;
 }
 
 /**
@@ -167,8 +234,9 @@ void z_vprintk(out_func_t out, void *ctx, const char *fmt, va_list ap)
 				}
 				goto still_might_format;
 			case 'd':
-			case 'i': {
-				long d;
+			case 'i':
+			case 'u': {
+				printk_val_t d;
 
 				if (length_mod == 'z') {
 					d = va_arg(ap, ssize_t);
@@ -176,58 +244,32 @@ void z_vprintk(out_func_t out, void *ctx, const char *fmt, va_list ap)
 					d = va_arg(ap, long);
 				} else if (length_mod == 'L') {
 					long long lld = va_arg(ap, long long);
-					if (lld > __LONG_MAX__ ||
-					    lld < ~__LONG_MAX__) {
-						print_err(out, ctx);
+					if (!ok64(out, ctx, lld)) {
 						break;
 					}
-					d = lld;
+					d = (printk_val_t) lld;
 				} else {
 					d = va_arg(ap, int);
 				}
 
-				if (d < 0) {
+				if (*fmt != 'u' && negative(d)) {
 					out((int)'-', ctx);
 					d = -d;
 					min_width--;
 				}
-				_printk_dec_ulong(out, ctx, d, padding,
-						  min_width);
-				break;
-			}
-			case 'u': {
-				unsigned long u;
-
-				if (length_mod == 'z') {
-					u = va_arg(ap, size_t);
-				} else if (length_mod == 'l') {
-					u = va_arg(ap, unsigned long);
-				} else if (length_mod == 'L') {
-					unsigned long long llu =
-						va_arg(ap, unsigned long long);
-					if (llu > ~0UL) {
-						print_err(out, ctx);
-						break;
-					}
-					u = llu;
-				} else {
-					u = va_arg(ap, unsigned int);
-				}
-
-				_printk_dec_ulong(out, ctx, u, padding,
-						  min_width);
+				print_dec(out, ctx, d, padding, min_width);
 				break;
 			}
 			case 'p':
-				  out('0', ctx);
-				  out('x', ctx);
-				  /* left-pad pointers with zeros */
-				  padding = PAD_ZERO_BEFORE;
-				  min_width = 8;
-				  /* Fall through */
+				out('0', ctx);
+				out('x', ctx);
+				/* left-pad pointers with zeros */
+				padding = PAD_ZERO_BEFORE;
+				min_width = sizeof(void *) * 2;
+				/* Fall through */
 			case 'x':
 			case 'X': {
-				unsigned long long x;
+				printk_val_t x;
 
 				if (*fmt == 'p') {
 					x = (uintptr_t)va_arg(ap, void *);
@@ -239,8 +281,7 @@ void z_vprintk(out_func_t out, void *ctx, const char *fmt, va_list ap)
 					x = va_arg(ap, unsigned int);
 				}
 
-				_printk_hex_ulong(out, ctx, x, padding,
-						  min_width);
+				print_hex(out, ctx, x, padding, min_width);
 				break;
 			}
 			case 's': {
@@ -281,6 +322,7 @@ still_might_format:
 	}
 }
 
+#ifdef CONFIG_PRINTK
 #ifdef CONFIG_USERSPACE
 struct buf_out_context {
 	int count;
@@ -333,26 +375,47 @@ void vprintk(const char *fmt, va_list ap)
 		}
 	} else {
 		struct out_context ctx = { 0 };
+#ifdef CONFIG_PRINTK_SYNC
+		k_spinlock_key_t key = k_spin_lock(&lock);
+#endif
 
 		z_vprintk(char_out, &ctx, fmt, ap);
+
+#ifdef CONFIG_PRINTK_SYNC
+		k_spin_unlock(&lock, key);
+#endif
 	}
 }
 #else
 void vprintk(const char *fmt, va_list ap)
 {
 	struct out_context ctx = { 0 };
+#ifdef CONFIG_PRINTK_SYNC
+	k_spinlock_key_t key = k_spin_lock(&lock);
+#endif
 
 	z_vprintk(char_out, &ctx, fmt, ap);
-}
+
+#ifdef CONFIG_PRINTK_SYNC
+	k_spin_unlock(&lock, key);
 #endif
+}
+#endif /* CONFIG_USERSPACE */
 
 void z_impl_k_str_out(char *c, size_t n)
 {
-	int i;
+	size_t i;
+#ifdef CONFIG_PRINTK_SYNC
+	k_spinlock_key_t key = k_spin_lock(&lock);
+#endif
 
 	for (i = 0; i < n; i++) {
 		_char_out(c[i]);
 	}
+
+#ifdef CONFIG_PRINTK_SYNC
+	k_spin_unlock(&lock, key);
+#endif
 }
 
 #ifdef CONFIG_USERSPACE
@@ -362,7 +425,7 @@ static inline void z_vrfy_k_str_out(char *c, size_t n)
 	z_impl_k_str_out((char *)c, n);
 }
 #include <syscalls/k_str_out_mrsh.c>
-#endif
+#endif /* CONFIG_USERSPACE */
 
 /**
  * @brief Output a string
@@ -399,107 +462,7 @@ void printk(const char *fmt, ...)
 	}
 	va_end(ap);
 }
-
-/**
- * @brief Output an unsigned long long in hex format
- *
- * Output an unsigned long long on output installed by platform at init time.
- * Able to print full 64-bit values.
- * @param num Number to output
- *
- * @return N/A
- */
-static void _printk_hex_ulong(out_func_t out, void *ctx,
-			      const unsigned long long num,
-			      enum pad_type padding,
-			      int min_width)
-{
-	int shift = sizeof(num) * 8;
-	int found_largest_digit = 0;
-	int remaining = 16; /* 16 digits max */
-	int digits = 0;
-	char nibble;
-
-	while (shift >= 4) {
-		shift -= 4;
-		nibble = (num >> shift) & 0xf;
-
-		if (nibble != 0 || found_largest_digit != 0 || shift == 0) {
-			found_largest_digit = 1;
-			nibble += nibble > 9 ? 87 : 48;
-			out((int)nibble, ctx);
-			digits++;
-			continue;
-		}
-
-		if (remaining-- <= min_width) {
-			if (padding == PAD_ZERO_BEFORE) {
-				out('0', ctx);
-			} else if (padding == PAD_SPACE_BEFORE) {
-				out(' ', ctx);
-			}
-		}
-	}
-
-	if (padding == PAD_SPACE_AFTER) {
-		remaining = min_width * 2 - digits;
-		while (remaining-- > 0) {
-			out(' ', ctx);
-		}
-	}
-}
-
-/**
- * @brief Output an unsigned long in decimal format
- *
- * Output an unsigned long on output installed by platform at init time.
- *
- * @param num Number to output
- *
- * @return N/A
- */
-static void _printk_dec_ulong(out_func_t out, void *ctx,
-			      const unsigned long num, enum pad_type padding,
-			      int min_width)
-{
-	unsigned long pos = 1000000000;
-	unsigned long remainder = num;
-	int found_largest_digit = 0;
-	int remaining = sizeof(long) * 5 / 2;
-	int digits = 1;
-
-	if (sizeof(long) == 8) {
-		pos *= 10000000000;
-	}
-
-	/* make sure we don't skip if value is zero */
-	if (min_width <= 0) {
-		min_width = 1;
-	}
-
-	while (pos >= 10) {
-		if (found_largest_digit != 0 || remainder >= pos) {
-			found_largest_digit = 1;
-			out((int)(remainder / pos + 48), ctx);
-			digits++;
-		} else if (remaining <= min_width
-				&& padding < PAD_SPACE_AFTER) {
-			out((int)(padding == PAD_ZERO_BEFORE ? '0' : ' '), ctx);
-			digits++;
-		}
-		remaining--;
-		remainder %= pos;
-		pos /= 10;
-	}
-	out((int)(remainder + 48), ctx);
-
-	if (padding == PAD_SPACE_AFTER) {
-		remaining = min_width - digits;
-		while (remaining-- > 0) {
-			out(' ', ctx);
-		}
-	}
-}
+#endif /* CONFIG_PRINTK */
 
 struct str_context {
 	char *str;

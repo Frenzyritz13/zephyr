@@ -24,7 +24,7 @@ struct unit_test {
 	void (*test)(void);
 	void (*setup)(void);
 	void (*teardown)(void);
-	u32_t thread_options;
+	uint32_t thread_options;
 };
 
 void z_ztest_run_test_suite(const char *name, struct unit_test *suite);
@@ -130,8 +130,8 @@ static inline void unit_test_noop(void)
 #define ztest_user_unit_test(fn) \
 	ztest_user_unit_test_setup_teardown(fn, unit_test_noop, unit_test_noop)
 
-extern void z_test_1cpu_start(void);
-extern void z_test_1cpu_stop(void);
+__syscall void z_test_1cpu_start(void);
+__syscall void z_test_1cpu_stop(void);
 
 /**
  * @brief Define a SMP-unsafe test function
@@ -206,6 +206,9 @@ extern struct k_mem_domain ztest_mem_domain;
 /**
  * @}
  */
+#ifndef ZTEST_UNITTEST
+#include <syscalls/ztest_test.h>
+#endif
 
 #ifdef __cplusplus
 }

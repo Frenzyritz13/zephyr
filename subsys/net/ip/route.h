@@ -58,7 +58,7 @@ struct net_route_entry {
 	struct in6_addr addr;
 
 	/** IPv6 address/prefix length. */
-	u8_t prefix_len;
+	uint8_t prefix_len;
 };
 
 /**
@@ -96,7 +96,7 @@ static inline struct net_route_entry *net_route_lookup(struct net_if *iface,
  */
 struct net_route_entry *net_route_add(struct net_if *iface,
 				      struct in6_addr *addr,
-				      u8_t prefix_len,
+				      uint8_t prefix_len,
 				      struct in6_addr *nexthop);
 
 /**
@@ -184,7 +184,7 @@ struct net_route_entry_mcast {
 	struct in6_addr group;
 
 	/** Routing entry lifetime in seconds. */
-	u32_t lifetime;
+	uint32_t lifetime;
 
 	/** Is this entry in user or not */
 	bool is_used;
@@ -261,6 +261,16 @@ bool net_route_get_info(struct net_if *iface,
  * @return 0 if there was no error, <0 if the packet could not be sent.
  */
 int net_route_packet(struct net_pkt *pkt, struct in6_addr *nexthop);
+
+/**
+ * @brief Send the network packet to network via the given interface.
+ *
+ * @param pkt Network packet to send.
+ * @param iface The network interface the packet should be sent on.
+ *
+ * @return 0 if there was no error, <0 if the packet could not be sent.
+ */
+int net_route_packet_if(struct net_pkt *pkt, struct net_if *iface);
 
 #if defined(CONFIG_NET_ROUTE) && defined(CONFIG_NET_NATIVE)
 void net_route_init(void);

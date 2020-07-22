@@ -1,14 +1,20 @@
-# Kconfig - ST Microelectronics STM32F1 MCU line
-#
+# ST Microelectronics STM32F1 MCU line
+
 # Copyright (c) 2016 Open-RnD Sp. z o.o.
 # Copyright (c) RnDity Sp. z o.o.
-#
 # SPDX-License-Identifier: Apache-2.0
-#
 
 choice
 	prompt "STM32F1x MCU Selection"
 	depends on SOC_SERIES_STM32F1X
+
+config SOC_STM32F100XB
+	bool "STM32F100XB"
+	select SOC_STM32F10X_DENSITY_DEVICE
+
+config SOC_STM32F100XE
+	bool "STM32F100XE"
+	select SOC_STM32F10X_DENSITY_DEVICE
 
 config SOC_STM32F103XE
 	bool "STM32F103XE"

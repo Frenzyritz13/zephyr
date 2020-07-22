@@ -1,4 +1,3 @@
 tests:
-  kernel.object_tracing:
-    min_ram: 32
+  kernel.objects.tracing:
     tags: kernel

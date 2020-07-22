@@ -8,47 +8,38 @@
 #ifndef ZEPHYR_DRIVERS_FLASH_FLASH_STM32_H_
 #define ZEPHYR_DRIVERS_FLASH_FLASH_STM32_H_
 
-#include <flash_registers.h>
-
 #if defined(CONFIG_SOC_SERIES_STM32L4X) || \
 	defined(CONFIG_SOC_SERIES_STM32F0X) || \
+	defined(CONFIG_SOC_SERIES_STM32F1X) || \
 	defined(CONFIG_SOC_SERIES_STM32F3X) || \
 	defined(CONFIG_SOC_SERIES_STM32G0X) || \
 	defined(CONFIG_SOC_SERIES_STM32G4X)
 #include <drivers/clock_control.h>
-#include <clock_control/stm32_clock_control.h>
+#include <drivers/clock_control/stm32_clock_control.h>
 #endif
 
 struct flash_stm32_priv {
-#if defined(CONFIG_SOC_SERIES_STM32F0X)
-	struct stm32f0x_flash *regs;
-	/* clock subsystem driving this peripheral */
-	struct stm32_pclken pclken;
-#elif defined(CONFIG_SOC_SERIES_STM32F3X)
-	struct stm32f3x_flash *regs;
-	/* clock subsystem driving this peripheral */
-	struct stm32_pclken pclken;
-#elif defined(CONFIG_SOC_SERIES_STM32F4X)
-	struct stm32f4x_flash *regs;
-#elif defined(CONFIG_SOC_SERIES_STM32F7X)
-	struct stm32f7x_flash *regs;
-#elif defined(CONFIG_SOC_SERIES_STM32L4X)
-	struct stm32l4x_flash *regs;
-	/* clock subsystem driving this peripheral */
-	struct stm32_pclken pclken;
-#elif defined(CONFIG_SOC_SERIES_STM32WBX)
-	struct stm32wbx_flash *regs;
-#elif defined(CONFIG_SOC_SERIES_STM32G0X)
-	struct stm32g0x_flash *regs;
-	/* clock subsystem driving this peripheral */
-	struct stm32_pclken pclken;
-#elif defined(CONFIG_SOC_SERIES_STM32G4X)
-	struct stm32g4x_flash *regs;
+	FLASH_TypeDef *regs;
+#if defined(CONFIG_SOC_SERIES_STM32L4X) || \
+	defined(CONFIG_SOC_SERIES_STM32F0X) || \
+	defined(CONFIG_SOC_SERIES_STM32F1X) || \
+	defined(CONFIG_SOC_SERIES_STM32F3X) || \
+	defined(CONFIG_SOC_SERIES_STM32G0X) || \
+	defined(CONFIG_SOC_SERIES_STM32G4X)
 	/* clock subsystem driving this peripheral */
 	struct stm32_pclken pclken;
 #endif
 	struct k_sem sem;
 };
+
+#if DT_PROP(DT_INST(0, soc_nv_flash), write_block_size)
+#define FLASH_STM32_WRITE_BLOCK_SIZE \
+	DT_PROP(DT_INST(0, soc_nv_flash), write_block_size)
+#else
+#error Flash write block size not available
+	/* Flash Write block size is extracted from device tree */
+	/* as flash node property 'write-block-size' */
+#endif
 
 #define FLASH_STM32_PRIV(dev) ((struct flash_stm32_priv *)((dev)->driver_data))
 #define FLASH_STM32_REGS(dev) (FLASH_STM32_PRIV(dev)->regs)
@@ -56,7 +47,7 @@ struct flash_stm32_priv {
 #ifdef CONFIG_FLASH_PAGE_LAYOUT
 static inline bool flash_stm32_range_exists(struct device *dev,
 					    off_t offset,
-					    u32_t len)
+					    uint32_t len)
 {
 	struct flash_pages_info info;
 
@@ -66,7 +57,7 @@ static inline bool flash_stm32_range_exists(struct device *dev,
 #endif	/* CONFIG_FLASH_PAGE_LAYOUT */
 
 bool flash_stm32_valid_range(struct device *dev, off_t offset,
-			     u32_t len, bool write);
+			     uint32_t len, bool write);
 
 int flash_stm32_write_range(struct device *dev, unsigned int offset,
 			    const void *data, unsigned int len);

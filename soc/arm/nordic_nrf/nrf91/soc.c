@@ -14,7 +14,7 @@
 
 #include <kernel.h>
 #include <init.h>
-#include <cortex_m/exc.h>
+#include <arch/arm/aarch32/cortex_m/cmsis.h>
 #include <soc/nrfx_coredep.h>
 #include <logging/log.h>
 
@@ -36,7 +36,7 @@ LOG_MODULE_REGISTER(soc);
 
 static int nordicsemi_nrf91_init(struct device *arg)
 {
-	u32_t key;
+	uint32_t key;
 
 	ARG_UNUSED(arg);
 
@@ -57,7 +57,7 @@ static int nordicsemi_nrf91_init(struct device *arg)
 	return 0;
 }
 
-void z_arch_busy_wait(u32_t time_us)
+void arch_busy_wait(uint32_t time_us)
 {
 	nrfx_coredep_delay_us(time_us);
 }

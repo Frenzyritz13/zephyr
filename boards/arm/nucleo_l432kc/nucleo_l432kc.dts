@@ -16,12 +16,13 @@
 		zephyr,shell-uart = &usart2;
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
+		zephyr,can-primary = &can1;
 	};
 
 	leds {
 		compatible = "gpio-leds";
 		green_led: led_0 {
-			gpios = <&gpiob 3 GPIO_INT_ACTIVE_HIGH>;
+			gpios = <&gpiob 3 GPIO_ACTIVE_HIGH>;
 			label = "User LD3";
 		};
 	};
@@ -33,14 +34,10 @@
 
 &usart1 {
 	current-speed = <115200>;
-	pinctrl-0 = <&usart1_pins_b>;
-	pinctrl-names = "default";
 };
 
 &usart2 {
 	current-speed = <115200>;
-	pinctrl-0 = <&usart2_pins_b>;
-	pinctrl-names = "default";
 	status = "okay";
 };
 
@@ -51,19 +48,21 @@
 &timers2 {
 	status = "okay";
 
-	pwm {
+	pwm2: pwm {
 		status = "okay";
 	};
 };
 
 &can1 {
-	pinctrl-0 = <&can_pins_a>;
-	pinctrl-names = "default";
 	bus-speed = <125000>;
 	status = "okay";
 };
 
 &rtc {
+	status = "okay";
+};
+
+&lptim1 {
 	status = "okay";
 };
 

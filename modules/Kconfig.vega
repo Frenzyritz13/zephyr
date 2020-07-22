@@ -15,6 +15,16 @@ config HAS_RV32M1_LPI2C
 	help
 	  Set if the low power i2c (LPI2C) module is present in the SoC.
 
+config HAS_RV32M1_LPSPI
+	bool
+	help
+	  Set if the low power spi (LPSPI) module is present in the SoC.
+
+config HAS_RV32M1_TPM
+	bool
+	help
+	  Set if the Timer/PWM (TPM) module is present in the SoC.
+
 config HAS_RV32M1_FTFX
 	bool
 	help

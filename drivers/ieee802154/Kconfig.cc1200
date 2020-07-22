@@ -1,7 +1,6 @@
-# SPDX-License-Identifier: Apache-2.0
+# TI CC1200 configuration options
 
-# Kconfig.cc1200 - TI CC1200 configuration options
-#
+# SPDX-License-Identifier: Apache-2.0
 
 menuconfig IEEE802154_CC1200
 	bool "TI CC1200 Driver support"
@@ -15,12 +14,6 @@ config IEEE802154_CC1200_DRV_NAME
 	default "cc1200"
 	help
 	  This option sets the driver name
-
-config IEEE802154_CC1200_GPIO_SPI_CS
-	bool "Manage SPI CS through a GPIO pin"
-	help
-	  This option is useful if one needs to manage SPI CS through a GPIO
-	  pin to by-pass the SPI controller's CS logic.
 
 config IEEE802154_CC1200_RX_STACK_SIZE
 	int "Driver's internal RX thread stack size"

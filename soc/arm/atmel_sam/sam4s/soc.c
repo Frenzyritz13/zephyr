@@ -18,7 +18,7 @@
 #include <init.h>
 #include <soc.h>
 #include <arch/cpu.h>
-#include <cortex_m/exc.h>
+#include <arch/arm/aarch32/cortex_m/cmsis.h>
 
 /**
  * @brief Setup various clock on SoC at boot time.
@@ -30,7 +30,7 @@
  */
 static ALWAYS_INLINE void clock_init(void)
 {
-	u32_t reg_val;
+	uint32_t reg_val;
 
 #ifdef CONFIG_SOC_ATMEL_SAM4S_EXT_SLCK
 	/* Switch slow clock to the external 32 KHz crystal oscillator. */
@@ -190,7 +190,7 @@ static ALWAYS_INLINE void clock_init(void)
  */
 static int atmel_sam4s_init(struct device *arg)
 {
-	u32_t key;
+	uint32_t key;
 
 	ARG_UNUSED(arg);
 

@@ -11,6 +11,7 @@ zephyr_library_sources_ifdef(CONFIG_BT_AVDTP            avdtp.c)
 zephyr_library_sources_ifdef(CONFIG_BT_RFCOMM           rfcomm.c)
 zephyr_library_sources_ifdef(CONFIG_BT_TESTING          testing.c)
 zephyr_library_sources_ifdef(CONFIG_BT_SETTINGS         settings.c)
+zephyr_library_sources_ifdef(CONFIG_BT_HOST_CCM         aes_ccm.c)
 
 zephyr_library_sources_ifdef(
   CONFIG_BT_BREDR
@@ -54,4 +55,25 @@ if(CONFIG_BT_HCI_HOST)
         )
     endif()
   endif()
+endif()
+
+if(CONFIG_BT_DEBUG_SMP OR CONFIG_BT_DEBUG_KEYS)
+  message(WARNING "One or both these options are enabled:
+  CONFIG_BT_DEBUG_SMP CONFIG_BT_DEBUG_KEYS.
+  Private security keys such as the LTK will be printed out, do not use in
+  production."
+    )
+endif()
+if(CONFIG_BT_OOB_DATA_FIXED)
+  message(WARNING "CONFIG_BT_OOB_DATA_FIXED is enabled.
+  A hardcoded OOB data set will be stored in the image, do not use in
+  production."
+    )
+endif()
+if(CONFIG_BT_USE_DEBUG_KEYS OR CONFIG_BT_STORE_DEBUG_KEYS)
+  message(WARNING "One or both these options are enabled:
+  CONFIG_BT_USE_DEBUG_KEYS CONFIG_BT_STORE_DEBUG_KEYS.
+  A predefined, publicly available keypair intended for testing will be used.
+  Do not use in production."
+    )
 endif()

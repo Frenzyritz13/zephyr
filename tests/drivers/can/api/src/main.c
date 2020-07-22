@@ -43,12 +43,8 @@
 
 #if defined(CONFIG_CAN_LOOPBACK_DEV_NAME)
 #define CAN_DEVICE_NAME CONFIG_CAN_LOOPBACK_DEV_NAME
-#elif defined(DT_CAN_0_NAME)
-#define CAN_DEVICE_NAME DT_CAN_0_NAME
-#elif defined(DT_CAN_1_NAME)
-#define CAN_DEVICE_NAME DT_CAN_1_NAME
 #else
-#define CAN_DEVICE_NAME ""
+#define CAN_DEVICE_NAME DT_CHOSEN_ZEPHYR_CAN_PRIMARY_LABEL
 #endif
 
 CAN_DEFINE_MSGQ(can_msgq, 5);
@@ -132,7 +128,7 @@ const struct zcan_filter test_std_some_filter = {
 struct zcan_work can_work;
 
 static inline void check_msg(struct zcan_frame *msg1, struct zcan_frame *msg2,
-			     u32_t mask)
+			     uint32_t mask)
 {
 	int cmp_res;
 
@@ -157,7 +153,7 @@ static inline void check_msg(struct zcan_frame *msg1, struct zcan_frame *msg2,
 	zassert_equal(cmp_res, 0, "Received data differ");
 }
 
-static void tx_std_isr(u32_t error_flags, void *arg)
+static void tx_std_isr(uint32_t error_flags, void *arg)
 {
 	struct zcan_frame *msg = (struct zcan_frame *)arg;
 
@@ -166,7 +162,7 @@ static void tx_std_isr(u32_t error_flags, void *arg)
 	zassert_equal(msg->std_id, TEST_CAN_STD_ID, "Arg does not match");
 }
 
-static void tx_std_masked_isr(u32_t error_flags, void *arg)
+static void tx_std_masked_isr(uint32_t error_flags, void *arg)
 {
 	struct zcan_frame *msg = (struct zcan_frame *)arg;
 
@@ -175,7 +171,7 @@ static void tx_std_masked_isr(u32_t error_flags, void *arg)
 	zassert_equal(msg->std_id, TEST_CAN_STD_MASK_ID, "Arg does not match");
 }
 
-static void tx_ext_isr(u32_t error_flags, void *arg)
+static void tx_ext_isr(uint32_t error_flags, void *arg)
 {
 	struct zcan_frame *msg = (struct zcan_frame *)arg;
 
@@ -184,7 +180,7 @@ static void tx_ext_isr(u32_t error_flags, void *arg)
 	zassert_equal(msg->ext_id, TEST_CAN_EXT_ID, "Arg does not match");
 }
 
-static void tx_ext_masked_isr(u32_t error_flags, void *arg)
+static void tx_ext_masked_isr(uint32_t error_flags, void *arg)
 {
 	struct zcan_frame *msg = (struct zcan_frame *)arg;
 
@@ -369,7 +365,7 @@ static void send_receive(const struct zcan_filter *filter, struct zcan_frame *ms
 {
 	int ret, filter_id;
 	struct zcan_frame msg_buffer;
-	u32_t mask = 0U;
+	uint32_t mask = 0U;
 
 	zassert_not_null(can_dev, "Device not not found");
 
@@ -593,6 +589,21 @@ static void test_send_receive_wrong_id(void)
 	can_detach(can_dev, filter_id);
 }
 
+/*
+ * Check if a call with dlc > CAN_MAX_DLC returns CAN_TX_EINVAL
+ */
+static void test_send_invalid_dlc(void)
+{
+	struct zcan_frame frame;
+	int ret;
+
+	frame.dlc = CAN_MAX_DLC + 1;
+
+	ret = can_send(can_dev, &frame, TEST_SEND_TIMEOUT, tx_std_isr, NULL);
+	zassert_equal(ret, CAN_TX_EINVAL,
+		      "ret [%d] not equal to %d", ret, CAN_TX_EINVAL);
+}
+
 void test_main(void)
 {
 	k_sem_init(&rx_isr_sem, 0, 1);
@@ -612,6 +623,7 @@ void test_main(void)
 			 ztest_unit_test(test_send_receive_std_masked),
 			 ztest_unit_test(test_send_receive_ext_masked),
 			 ztest_unit_test(test_send_receive_buffer),
-			 ztest_unit_test(test_send_receive_wrong_id));
+			 ztest_unit_test(test_send_receive_wrong_id),
+			 ztest_unit_test(test_send_invalid_dlc));
 	ztest_run_test_suite(can_driver);
 }

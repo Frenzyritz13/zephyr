@@ -121,8 +121,7 @@ class BuildConfiguration:
     Configuration options can be read as if the object were a dict,
     either object['CONFIG_FOO'] or object.get('CONFIG_FOO').
 
-    Configuration values in .config and generated_dts_board.conf are
-    available.'''
+    Kconfig configuration values are available (parsed from .config).'''
 
     def __init__(self, build_dir):
         self.build_dir = build_dir
@@ -139,12 +138,7 @@ class BuildConfiguration:
         return self.options.get(option, *args)
 
     def _init(self):
-        build_z = os.path.join(self.build_dir, 'zephyr')
-        generated = os.path.join(build_z, 'include', 'generated')
-        files = [os.path.join(build_z, '.config'),
-                 os.path.join(generated, 'generated_dts_board.conf')]
-        for f in files:
-            self._parse(f)
+        self._parse(os.path.join(self.build_dir, 'zephyr', '.config'))
 
     def _parse(self, filename):
         with open(filename, 'r') as f:
@@ -192,17 +186,40 @@ class RunnerCaps:
     - flash_addr: whether the runner supports flashing to an
       arbitrary address. Default is False. If true, the runner
       must honor the --dt-flash option.
+
+    - erase: whether the runner supports an --erase option, which
+      does a mass-erase of the entire addressable flash on the target
+      before flashing. On multi-core SoCs, this may only erase portions of
+      flash specific the actual target core. (This option can be useful for
+      things like clearing out old settings values or other subsystem state
+      that may affect the behavior of the zephyr image. It is also sometimes
+      needed by SoCs which have flash-like areas that can't be sector
+      erased by the underlying tool before flashing; UICR on nRF SoCs
+      is one example.)
     '''
 
     def __init__(self,
                  commands={'flash', 'debug', 'debugserver', 'attach'},
-                 flash_addr=False):
+                 flash_addr=False, erase=False):
         self.commands = commands
         self.flash_addr = bool(flash_addr)
+        self.erase = bool(erase)
 
     def __str__(self):
-        return 'RunnerCaps(commands={}, flash_addr={})'.format(
-            self.commands, self.flash_addr)
+        return (f'RunnerCaps(commands={self.commands}, '
+                f'flash_addr={self.flash_addr}, '
+                f'erase={self.erase}'
+                ')')
+
+
+def _missing_cap(cls, option):
+    # Helper function that's called when an option was given on the
+    # command line that corresponds to a missing capability.
+    #
+    # 'cls' is a ZephyrBinaryRunner subclass; 'option' is an option
+    # that can't be supported due to missing capability.
+
+    raise ValueError(f"{cls.name()} doesn't support {option} option")
 
 
 class RunnerConfig:
@@ -266,7 +283,9 @@ class _DTFlashAction(argparse.Action):
 class ZephyrBinaryRunner(abc.ABC):
     '''Abstract superclass for binary runners (flashers, debuggers).
 
-    **Note**: these APIs are still evolving, and will change!
+    **Note**: this class's API has changed relatively rarely since it
+    as added, but it is not considered a stable Zephyr API, and may change
+    without notice.
 
     With some exceptions, boards supported by Zephyr must provide
     generic means to be flashed (have a Zephyr firmware binary
@@ -298,7 +317,7 @@ class ZephyrBinaryRunner(abc.ABC):
     This class provides an API for these commands. Every subclass is
     called a 'runner' for short. Each runner has a name (like
     'pyocd'), and declares commands it can handle (like
-    'flash'). Boards (like 'nrf52_pca10040') declare which runner(s)
+    'flash'). Boards (like 'nrf52dk_nrf52832') declare which runner(s)
     are compatible with them to the Zephyr build system, along with
     information on how to configure the runner to work with the board.
 
@@ -319,7 +338,13 @@ class ZephyrBinaryRunner(abc.ABC):
     3. Give your runner's name to the Zephyr build system in your
        board's board.cmake.
 
-    Some advice on input and output:
+    Additional advice:
+
+    - If you need to import any non-standard-library modules, make sure
+      to catch ImportError and defer complaints about it to a RuntimeError
+      if one is missing. This avoids affecting users that don't require your
+      runner, while still making it clear what went wrong to users that do
+      require it that don't have the necessary modules installed.
 
     - If you need to ask the user something (e.g. using input()), do it
       in your create() classmethod, not do_run(). That ensures your
@@ -364,8 +389,7 @@ class ZephyrBinaryRunner(abc.ABC):
 
         When choosing a name, pick something short and lowercase,
         based on the name of the tool (like openocd, jlink, etc.) or
-        the target architecture/board (like xtensa, em-starterkit,
-        etc.).'''
+        the target architecture/board (like xtensa etc.).'''
 
     @classmethod
     def capabilities(cls):
@@ -390,13 +414,24 @@ class ZephyrBinaryRunner(abc.ABC):
 
         Runner-specific options are added through the do_add_parser()
         hook.'''
-        # Common options that depend on runner capabilities.
-        if cls.capabilities().flash_addr:
+        # Common options that depend on runner capabilities. If a
+        # capability is not supported, the option string or strings
+        # are added anyway, to prevent an individual runner class from
+        # using them to mean something else.
+        caps = cls.capabilities()
+
+        if caps.flash_addr:
             parser.add_argument('--dt-flash', default='n', choices=_YN_CHOICES,
                                 action=_DTFlashAction,
                                 help='''If 'yes', use configuration generated
                                 by device tree (DT) to compute flash
                                 addresses.''')
+        else:
+            parser.add_argument('--dt-flash', help=argparse.SUPPRESS)
+
+        parser.add_argument('--erase', action='store_true',
+                            help=('if given, mass erase flash before loading'
+                                  if caps.erase else argparse.SUPPRESS))
 
         # Runner-specific options.
         cls.do_add_parser(parser)
@@ -407,13 +442,24 @@ class ZephyrBinaryRunner(abc.ABC):
         '''Hook for adding runner-specific options.'''
 
     @classmethod
-    @abc.abstractmethod
     def create(cls, cfg, args):
         '''Create an instance from command-line arguments.
 
         - ``cfg``: RunnerConfig instance (pass to superclass __init__)
         - ``args``: runner-specific argument namespace parsed from
           execution environment, as specified by ``add_parser()``.'''
+        caps = cls.capabilities()
+        if args.dt_flash and not caps.flash_addr:
+            _missing_cap(cls, '--dt-flash')
+        if args.erase and not caps.erase:
+            _missing_cap(cls, '--erase')
+
+        return cls.do_create(cfg, args)
+
+    @classmethod
+    @abc.abstractmethod
+    def do_create(cls, cfg, args):
+        '''Hook for instance creation from command line arguments.'''
 
     @classmethod
     def get_flash_address(cls, args, build_conf, default=0x0):

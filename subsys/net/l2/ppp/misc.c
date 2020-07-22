@@ -44,7 +44,7 @@ const char *ppp_phase_str(enum ppp_phase phase)
 static void validate_phase_transition(enum ppp_phase current,
 				      enum ppp_phase new)
 {
-	static const u8_t valid_transitions[] = {
+	static const uint8_t valid_transitions[] = {
 		[PPP_DEAD] = 1 << PPP_ESTABLISH,
 		[PPP_ESTABLISH] = 1 << PPP_DEAD |
 				1 << PPP_AUTH |
@@ -166,7 +166,7 @@ const char *ppp_pkt_type2str(enum ppp_packet_type type)
 	return "";
 }
 
-const char *ppp_proto2str(u16_t proto)
+const char *ppp_proto2str(uint16_t proto)
 {
 #if (CONFIG_NET_L2_PPP_LOG_LEVEL >= LOG_LEVEL_DBG)
 	switch (proto) {
@@ -197,7 +197,7 @@ static void validate_state_transition(enum ppp_state current,
 				      enum ppp_state new)
 {
 	/* See RFC 1661 ch. 4.1 */
-	static const u16_t valid_transitions[] = {
+	static const uint16_t valid_transitions[] = {
 		[PPP_INITIAL] = 1 << PPP_CLOSED |
 				1 << PPP_STARTING,
 		[PPP_STARTING] = 1 << PPP_INITIAL |
@@ -317,6 +317,14 @@ const char *ppp_option2str(enum ppp_protocol_type protocol,
 			return "IP_COMPRESSION_PROTOCOL";
 		case IPCP_OPTION_IP_ADDRESS:
 			return "IP_ADDRESS";
+		case IPCP_OPTION_DNS1:
+			return "DNS1";
+		case IPCP_OPTION_NBNS1:
+			return "NBNS1";
+		case IPCP_OPTION_DNS2:
+			return "DNS2";
+		case IPCP_OPTION_NBNS2:
+			return "NBNS2";
 		}
 
 		break;

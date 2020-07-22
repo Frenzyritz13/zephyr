@@ -1,10 +1,7 @@
-# Kconfig - DMA configuration options
-#
-#
+# DMA configuration options
+
 # Copyright (c) 2016 Intel Corporation
-#
 # SPDX-License-Identifier: Apache-2.0
-#
 
 #
 # DMA options
@@ -41,14 +38,16 @@ module = DMA
 module-str = dma
 source "subsys/logging/Kconfig.template.log_config"
 
-source "drivers/dma/Kconfig.stm32f4x"
+source "drivers/dma/Kconfig.stm32"
 
 source "drivers/dma/Kconfig.sam_xdmac"
 
-source "drivers/dma/Kconfig.cavs"
+source "drivers/dma/Kconfig.dw"
 
 source "drivers/dma/Kconfig.nios2_msgdma"
 
 source "drivers/dma/Kconfig.sam0"
+
+source "drivers/dma/Kconfig.mcux_edma"
 
 endif # DMA

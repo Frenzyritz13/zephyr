@@ -28,7 +28,7 @@ struct shell_telnet *sh_telnet;
 /* Various definitions mapping the TELNET service configuration options */
 #define TELNET_PORT      CONFIG_SHELL_TELNET_PORT
 #define TELNET_LINE_SIZE CONFIG_SHELL_TELNET_LINE_BUF_SIZE
-#define TELNET_TIMEOUT   K_MSEC(CONFIG_SHELL_TELNET_SEND_TIMEOUT)
+#define TELNET_TIMEOUT   CONFIG_SHELL_TELNET_SEND_TIMEOUT
 
 #define TELNET_MIN_MSG 2
 
@@ -43,7 +43,7 @@ static void telnet_end_client_connection(void)
 	sh_telnet->client_ctx = NULL;
 	sh_telnet->output_lock = false;
 
-	k_timer_stop(&sh_telnet->send_timer);
+	k_delayed_work_cancel(&sh_telnet->send_work);
 
 	/* Flush the RX FIFO */
 	while ((pkt = k_fifo_get(&sh_telnet->rx_fifo, K_NO_WAIT)) != NULL) {
@@ -60,7 +60,7 @@ static void telnet_sent_cb(struct net_context *client,
 	}
 }
 
-static void telnet_command_send_reply(u8_t *msg, u16_t len)
+static void telnet_command_send_reply(uint8_t *msg, uint16_t len)
 {
 	int err;
 
@@ -80,7 +80,7 @@ static void telnet_reply_ay_command(void)
 {
 	static const char alive[] = "Zephyr at your service\r\n";
 
-	telnet_command_send_reply((u8_t *)alive, strlen(alive));
+	telnet_command_send_reply((uint8_t *)alive, strlen(alive));
 }
 
 static void telnet_reply_do_command(struct telnet_simple_command *cmd)
@@ -94,7 +94,7 @@ static void telnet_reply_do_command(struct telnet_simple_command *cmd)
 		break;
 	}
 
-	telnet_command_send_reply((u8_t *)cmd,
+	telnet_command_send_reply((uint8_t *)cmd,
 				  sizeof(struct telnet_simple_command));
 }
 
@@ -109,7 +109,7 @@ static void telnet_reply_command(struct telnet_simple_command *cmd)
 		/* OK, no output then */
 		sh_telnet->output_lock = true;
 		sh_telnet->line_out.len = 0;
-		k_timer_stop(&sh_telnet->send_timer);
+		k_delayed_work_cancel(&sh_telnet->send_work);
 		break;
 	case NVT_CMD_AYT:
 		telnet_reply_ay_command();
@@ -150,7 +150,7 @@ static int telnet_send(void)
 	return 0;
 }
 
-static void telnet_send_prematurely(struct k_timer *timer)
+static void telnet_send_prematurely(struct k_work *work)
 {
 	(void)telnet_send();
 }
@@ -158,7 +158,7 @@ static void telnet_send_prematurely(struct k_timer *timer)
 static inline bool telnet_handle_command(struct net_pkt *pkt)
 {
 	/* Commands are two or three bytes. */
-	NET_PKT_DATA_ACCESS_CONTIGUOUS_DEFINE(cmd_access, u16_t);
+	NET_PKT_DATA_ACCESS_CONTIGUOUS_DEFINE(cmd_access, uint16_t);
 	struct telnet_simple_command *cmd;
 
 	cmd = (struct telnet_simple_command *)net_pkt_get_data(pkt,
@@ -232,7 +232,7 @@ static void telnet_accept(struct net_context *client,
 		goto error;
 	}
 
-	if (net_context_recv(client, telnet_recv, 0, NULL)) {
+	if (net_context_recv(client, telnet_recv, K_NO_WAIT, NULL)) {
 		LOG_ERR("Unable to setup reception (family %u)",
 			net_context_get_family(client));
 		goto error;
@@ -343,7 +343,7 @@ static int init(const struct shell_transport *transport,
 	sh_telnet->shell_context = context;
 
 	k_fifo_init(&sh_telnet->rx_fifo);
-	k_timer_init(&sh_telnet->send_timer, telnet_send_prematurely, NULL);
+	k_delayed_work_init(&sh_telnet->send_work, telnet_send_prematurely);
 
 	return 0;
 }
@@ -372,7 +372,7 @@ static int write(const struct shell_transport *transport,
 	struct shell_telnet_line_buf *lb;
 	size_t copy_len;
 	int err;
-	u32_t timeout;
+	uint32_t timeout;
 
 	if (sh_telnet == NULL) {
 		*cnt = 0;
@@ -389,8 +389,8 @@ static int write(const struct shell_transport *transport,
 
 	/* Stop the transmission timer, so it does not interrupt the operation.
 	 */
-	timeout = k_timer_remaining_get(&sh_telnet->send_timer);
-	k_timer_stop(&sh_telnet->send_timer);
+	timeout = k_delayed_work_remaining_get(&sh_telnet->send_work);
+	k_delayed_work_cancel(&sh_telnet->send_work);
 
 	do {
 		if (lb->len + length - *cnt > TELNET_LINE_SIZE) {
@@ -399,7 +399,7 @@ static int write(const struct shell_transport *transport,
 			copy_len = length - *cnt;
 		}
 
-		memcpy(lb->buf + lb->len, (u8_t *)data + *cnt, copy_len);
+		memcpy(lb->buf + lb->len, (uint8_t *)data + *cnt, copy_len);
 		lb->len += copy_len;
 
 		/* Send the data immediately if the buffer is full or line feed
@@ -422,7 +422,7 @@ static int write(const struct shell_transport *transport,
 		 */
 		timeout = (timeout == 0) ? TELNET_TIMEOUT : timeout;
 
-		k_timer_start(&sh_telnet->send_timer, timeout, K_NO_WAIT);
+		k_delayed_work_submit(&sh_telnet->send_work, K_MSEC(timeout));
 	}
 
 	sh_telnet->shell_handler(SHELL_TRANSPORT_EVT_TX_RDY,
@@ -490,7 +490,7 @@ static int enable_shell_telnet(struct device *arg)
 	ARG_UNUSED(arg);
 
 	bool log_backend = CONFIG_SHELL_TELNET_INIT_LOG_LEVEL > 0;
-	u32_t level = (CONFIG_SHELL_TELNET_INIT_LOG_LEVEL > LOG_LEVEL_DBG) ?
+	uint32_t level = (CONFIG_SHELL_TELNET_INIT_LOG_LEVEL > LOG_LEVEL_DBG) ?
 		      CONFIG_LOG_MAX_LEVEL : CONFIG_SHELL_TELNET_INIT_LOG_LEVEL;
 
 	return shell_init(&shell_telnet, NULL, true, log_backend, level);

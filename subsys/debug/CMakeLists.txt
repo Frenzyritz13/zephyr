@@ -5,4 +5,12 @@ zephyr_sources_ifdef(
   openocd.c
   )
 
-add_subdirectory(tracing)
+zephyr_sources_ifdef(
+  CONFIG_ASAN
+  asan_hacks.c
+  )
+
+zephyr_sources_ifdef(
+  CONFIG_THREAD_ANALYZER
+  thread_analyzer.c
+  )

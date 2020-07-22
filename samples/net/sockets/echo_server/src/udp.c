@@ -25,11 +25,13 @@ static void process_udp6(void);
 
 K_THREAD_DEFINE(udp4_thread_id, STACK_SIZE,
 		process_udp4, NULL, NULL, NULL,
-		THREAD_PRIORITY, 0, K_FOREVER);
+		THREAD_PRIORITY,
+		IS_ENABLED(CONFIG_USERSPACE) ? K_USER : 0, -1);
 
 K_THREAD_DEFINE(udp6_thread_id, STACK_SIZE,
 		process_udp6, NULL, NULL, NULL,
-		THREAD_PRIORITY, 0, K_FOREVER);
+		THREAD_PRIORITY,
+		IS_ENABLED(CONFIG_USERSPACE) ? K_USER : 0, -1);
 
 static int start_udp_proto(struct data *data, struct sockaddr *bind_addr,
 			   socklen_t bind_addrlen)
@@ -55,7 +57,7 @@ static int start_udp_proto(struct data *data, struct sockaddr *bind_addr,
 		PSK_TAG,
 #endif
 	};
-	int role = 1;
+	int role = TLS_DTLS_ROLE_SERVER;
 
 	ret = setsockopt(data->udp.sock, SOL_TLS, TLS_SEC_TAG_LIST,
 			 sec_tag_list, sizeof(sec_tag_list));
@@ -187,10 +189,18 @@ static void process_udp6(void)
 void start_udp(void)
 {
 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
+#if defined(CONFIG_USERSPACE)
+		k_mem_domain_add_thread(&app_domain, udp6_thread_id);
+#endif
+
 		k_thread_start(udp6_thread_id);
 	}
 
 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
+#if defined(CONFIG_USERSPACE)
+		k_mem_domain_add_thread(&app_domain, udp4_thread_id);
+#endif
+
 		k_thread_start(udp4_thread_id);
 	}
 }
@@ -202,14 +212,14 @@ void stop_udp(void)
 	 */
 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
 		k_thread_abort(udp6_thread_id);
-		if (conf.ipv6.udp.sock > 0) {
+		if (conf.ipv6.udp.sock >= 0) {
 			(void)close(conf.ipv6.udp.sock);
 		}
 	}
 
 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
 		k_thread_abort(udp4_thread_id);
-		if (conf.ipv4.udp.sock > 0) {
+		if (conf.ipv4.udp.sock >= 0) {
 			(void)close(conf.ipv4.udp.sock);
 		}
 	}

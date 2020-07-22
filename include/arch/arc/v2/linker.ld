@@ -9,11 +9,6 @@
  */
 
 #include <linker/sections.h>
-
-#if defined(CONFIG_UART_NSIM)
-	EXTERN(_VectorTable)
-#endif
-
 #include <linker/linker-defs.h>
 #include <linker/linker-tool.h>
 
@@ -62,16 +57,16 @@ ENTRY(CONFIG_KERNEL_ENTRY)
 
 MEMORY {
 #ifdef FLASH_START
-	FLASH (rx)  : ORIGIN = FLASH_START, LENGTH = FLASH_SIZE*1k
+	FLASH (rx)  : ORIGIN = FLASH_START, LENGTH = FLASH_SIZE
 #endif
 #ifdef ICCM_START
-	ICCM  (rwx)  : ORIGIN = ICCM_START,  LENGTH = ICCM_SIZE*1k
+	ICCM  (rwx)  : ORIGIN = ICCM_START,  LENGTH = ICCM_SIZE
 #endif
 #ifdef SRAM_START
-	SRAM  (rwx) : ORIGIN = SRAM_START,  LENGTH = SRAM_SIZE*1k
+	SRAM  (rwx) : ORIGIN = SRAM_START,  LENGTH = SRAM_SIZE
 #endif
 #ifdef DCCM_START
-	DCCM  (rw)  : ORIGIN = DCCM_START,  LENGTH = DCCM_SIZE*1k
+	DCCM  (rw)  : ORIGIN = DCCM_START,  LENGTH = DCCM_SIZE
 #endif
 	/* Used by and documented in include/linker/intlist.ld */
 	IDT_LIST  (wx)      : ORIGIN = 0xFFFFF7FF, LENGTH = 2K
@@ -87,11 +82,11 @@ SECTIONS {
 		_image_rom_start = .;
 		_image_text_start = .;
 
-/* when !XIP, .text is in RAM, and vector table must be at its very start */
-
-		KEEP(*(.exc_vector_table))
-		KEEP(*(".exc_vector_table.*"))
-		KEEP(*(IRQ_VECTOR_TABLE))
+/* Located in generated directory. This file is populated by calling
+ * zephyr_linker_sources(ROM_START ...). This typically contains the vector
+ * table and debug information.
+ */
+#include <snippets-rom-start.ld>
 
 		*(.text)
 		*(".text.*")
@@ -116,14 +111,6 @@ SECTIONS {
  * zephyr_linker_sources() Cmake function.
  */
 #include <snippets-rodata.ld>
-#ifdef CONFIG_SOC_RODATA_LD
-#include <soc-rodata.ld>
-#endif
-
-#ifdef CONFIG_CUSTOM_RODATA_LD
-/* Located in project source directory */
-#include <custom-rodata.ld>
-#endif
 
 #include <linker/kobject-rom.ld>
 
@@ -193,9 +180,6 @@ SECTIONS {
  * zephyr_linker_sources() Cmake function.
  */
 #include <snippets-noinit.ld>
-#ifdef CONFIG_SOC_NOINIT_LD
-#include <soc-noinit.ld>
-#endif
 
 	} GROUP_LINK_IN(RAMABLE_REGION)
 
@@ -211,14 +195,6 @@ SECTIONS {
  * zephyr_linker_sources() Cmake function.
  */
 #include <snippets-rwdata.ld>
-#ifdef CONFIG_SOC_RWDATA_LD
-#include <soc-rwdata.ld>
-#endif
-
-#ifdef CONFIG_CUSTOM_RWDATA_LD
-/* Located in project source directory */
-#include <custom-rwdata.ld>
-#endif
 
 	} GROUP_DATA_LINK_IN(RAMABLE_REGION, ROMABLE_REGION)
 
@@ -241,10 +217,6 @@ SECTIONS {
 
 	GROUP_END(RAMABLE_REGION)
 
-#ifdef CONFIG_CUSTOM_SECTIONS_LD
-/* Located in project source directory */
-#include <custom-sections.ld>
-#endif
 /* Located in generated directory. This file is populated by the
  * zephyr_linker_sources() Cmake function.
  */

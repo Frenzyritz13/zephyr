@@ -13,7 +13,7 @@
 #ifndef OPENTHREAD_CORE_ZEPHYR_CONFIG_H_
 #define OPENTHREAD_CORE_ZEPHYR_CONFIG_H_
 
-#include <generated_dts_board.h>
+#include <devicetree.h>
 
 /**
  * @def OPENTHREAD_CONFIG_NUM_MESSAGE_BUFFERS
@@ -49,26 +49,20 @@
 #define OPENTHREAD_CONFIG_LOG_PREPEND_LEVEL                     0
 
 /**
- * @def OPENTHREAD_CONFIG_SOFTWARE_ACK_TIMEOUT_ENABLE
+ * @def OPENTHREAD_CONFIG_MAC_SOFTWARE_ACK_TIMEOUT_ENABLE
  *
  * Define to 1 to enable software ACK timeout logic.
  *
- * Applicable only if raw link layer API is enabled
- * (i.e., `OPENTHREAD_CONFIG_LINK_RAW_ENABLE` is set).
- *
  */
-#define OPENTHREAD_CONFIG_SOFTWARE_ACK_TIMEOUT_ENABLE           1
+#define OPENTHREAD_CONFIG_MAC_SOFTWARE_ACK_TIMEOUT_ENABLE       1
 
 /**
- * @def OPENTHREAD_CONFIG_SOFTWARE_RETRANSMIT_ENABLE
+ * @def OPENTHREAD_CONFIG_MAC_SOFTWARE_RETRANSMIT_ENABLE
  *
  * Define to 1 to enable software retransmission logic.
  *
- * Applicable only if raw link layer API is enabled
- * (i.e., `OPENTHREAD_CONFIG_LINK_RAW_ENABLE` is set).
- *
  */
-#define OPENTHREAD_CONFIG_SOFTWARE_RETRANSMIT_ENABLE            1
+#define OPENTHREAD_CONFIG_MAC_SOFTWARE_RETRANSMIT_ENABLE        1
 
 /**
  * @def SETTINGS_CONFIG_BASE_ADDRESS
@@ -85,7 +79,8 @@
  * is set in your SOC dts file.
  *
  */
-#define SETTINGS_CONFIG_PAGE_SIZE          DT_FLASH_ERASE_BLOCK_SIZE
+#define SETTINGS_CONFIG_PAGE_SIZE \
+	DT_PROP(DT_CHOSEN(zephyr_flash), erase_block_size)
 
 /**
  * @def SETTINGS_CONFIG_PAGE_NUM
@@ -141,5 +136,41 @@
  *
  */
 #define RADIO_CONFIG_SRC_MATCH_EXT_ENTRY_NUM 0
+
+/**
+ * @def OPENTHREAD_CONFIG_NCP_BUFFER_SIZE
+ *
+ * The size of the NCP buffers.
+ *
+ */
+#define OPENTHREAD_CONFIG_NCP_BUFFER_SIZE 2048
+
+/**
+ * @def OPENTHREAD_CONFIG_PLAT_LOG_FUNCTION
+ *
+ * The platform logging function for openthread.
+ *
+ */
+#define _OT_CONF_PLAT_LOG_FUN_NARGS__IMPL(		\
+		_0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10,\
+		_11, _12, _13, _14, N, ...) N
+
+#define _OT_CONF_PLAT_LOG_FUN_NARGS__GET(...) \
+		_OT_CONF_PLAT_LOG_FUN_NARGS__IMPL(__VA_ARGS__,\
+		15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, ~)
+
+#define OPENTHREAD_CONFIG_PLAT_LOG_FUNCTION__COUNT_ARGS(aLogLevel, unused, \
+							aFormat, ...) \
+	otPlatLog(aLogLevel, \
+		  (otLogRegion)_OT_CONF_PLAT_LOG_FUN_NARGS__GET(__VA_ARGS__),\
+		  aFormat, ##__VA_ARGS__)
+
+#ifdef OPENTHREAD_CONFIG_PLAT_LOG_FUNCTION
+#error OPENTHREAD_CONFIG_PLAT_LOG_FUNCTION \
+	"OPENTHREAD_CONFIG_PLAT_LOG_FUNCTION mustn't be defined before"
+#endif
+
+#define OPENTHREAD_CONFIG_PLAT_LOG_FUNCTION \
+	OPENTHREAD_CONFIG_PLAT_LOG_FUNCTION__COUNT_ARGS
 
 #endif  /* OPENTHREAD_CORE_NRF52840_CONFIG_H_ */

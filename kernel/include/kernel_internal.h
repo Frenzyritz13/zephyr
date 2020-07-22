@@ -15,7 +15,8 @@
 #define ZEPHYR_KERNEL_INCLUDE_KERNEL_INTERNAL_H_
 
 #include <kernel.h>
-#include <stdbool.h>
+#include <kernel_arch_interface.h>
+#include <string.h>
 
 #ifndef _ASMLANGUAGE
 
@@ -43,17 +44,24 @@ extern void z_setup_new_thread(struct k_thread *new_thread,
 			      k_thread_stack_t *stack, size_t stack_size,
 			      k_thread_entry_t entry,
 			      void *p1, void *p2, void *p3,
-			      int prio, u32_t options, const char *name);
+			      int prio, uint32_t options, const char *name);
 
-#ifdef CONFIG_USERSPACE
-/**
- * @brief Zero out BSS sections for application shared memory
- *
- * This isn't handled by any platform bss zeroing, and is called from
- * z_cstart() if userspace is enabled.
- */
-extern void z_app_shmem_bss_zero(void);
-#endif /* CONFIG_USERSPACE */
+static inline void z_new_thread_init(struct k_thread *thread,
+				     char *stack, size_t stack_size)
+{
+#if !defined(CONFIG_INIT_STACKS) && !defined(CONFIG_THREAD_STACK_INFO)
+	ARG_UNUSED(stack);
+	ARG_UNUSED(stack_size);
+	ARG_UNUSED(thread);
+#endif
+#ifdef CONFIG_INIT_STACKS
+	memset(stack, 0xaa, stack_size);
+#endif
+#if defined(CONFIG_THREAD_STACK_INFO)
+	thread->stack_info.start = (uintptr_t)stack;
+	thread->stack_info.size = stack_size;
+#endif /* CONFIG_THREAD_STACK_INFO */
+}
 
 /**
  * @brief Allocate some memory from the current thread's resource pool
@@ -62,9 +70,11 @@ extern void z_app_shmem_bss_zero(void);
  * memory on behalf of certain kernel and driver APIs. Memory reserved
  * in this way should be freed with k_free().
  *
+ * If called from an ISR, the k_malloc() system heap will be used if it exists.
+ *
  * @param size Memory allocation size
  * @return A pointer to the allocated memory, or NULL if there is insufficient
- * RAM in the pool or the thread has no resource pool assigned
+ * RAM in the pool or there is no pool to draw memory from
  */
 void *z_thread_malloc(size_t size);
 
@@ -83,25 +93,53 @@ extern void z_thread_monitor_exit(struct k_thread *thread);
 	} while (false)
 #endif /* CONFIG_THREAD_MONITOR */
 
+#ifdef CONFIG_USE_SWITCH
+/* This is a arch function traditionally, but when the switch-based
+ * z_swap() is in use it's a simple inline provided by the kernel.
+ */
+static ALWAYS_INLINE void
+arch_thread_return_value_set(struct k_thread *thread, unsigned int value)
+{
+	thread->swap_retval = value;
+}
+#endif
+
+static ALWAYS_INLINE void
+z_thread_return_value_set_with_data(struct k_thread *thread,
+				   unsigned int value,
+				   void *data)
+{
+	arch_thread_return_value_set(thread, value);
+	thread->base.swap_data = data;
+}
+
 extern void z_smp_init(void);
 
 extern void smp_timer_init(void);
 
-extern u32_t z_early_boot_rand32_get(void);
+extern void z_early_boot_rand_get(uint8_t *buf, size_t length);
 
 #if CONFIG_STACK_POINTER_RANDOM
 extern int z_stack_adjust_initialized;
 #endif
 
 #ifdef CONFIG_BOOT_TIME_MEASUREMENT
-extern u32_t z_timestamp_main; /* timestamp when main task starts */
-extern u32_t z_timestamp_idle; /* timestamp when CPU goes idle */
+extern uint32_t z_timestamp_main; /* timestamp when main task starts */
+extern uint32_t z_timestamp_idle; /* timestamp when CPU goes idle */
 #endif
 
 extern struct k_thread z_main_thread;
-extern struct k_thread z_idle_thread;
-extern K_THREAD_STACK_DEFINE(z_main_stack, CONFIG_MAIN_STACK_SIZE);
-extern K_THREAD_STACK_DEFINE(z_idle_stack, CONFIG_IDLE_STACK_SIZE);
+
+
+#ifdef CONFIG_MULTITHREADING
+extern struct k_thread z_idle_threads[CONFIG_MP_NUM_CPUS];
+#endif
+extern K_THREAD_STACK_ARRAY_DEFINE(z_interrupt_stacks, CONFIG_MP_NUM_CPUS,
+				   CONFIG_ISR_STACK_SIZE);
+
+#ifdef CONFIG_GEN_PRIV_STACKS
+extern uint8_t *z_priv_stack_find(k_thread_stack_t *stack);
+#endif
 
 #ifdef __cplusplus
 }

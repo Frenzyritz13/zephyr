@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#define DT_DRV_COMPAT invensense_mpu6050
+
 #include <drivers/i2c.h>
 #include <init.h>
 #include <sys/byteorder.h>
@@ -15,23 +17,23 @@
 LOG_MODULE_REGISTER(MPU6050, CONFIG_SENSOR_LOG_LEVEL);
 
 /* see "Accelerometer Measurements" section from register map description */
-static void mpu6050_convert_accel(struct sensor_value *val, s16_t raw_val,
-				  u16_t sensitivity_shift)
+static void mpu6050_convert_accel(struct sensor_value *val, int16_t raw_val,
+				  uint16_t sensitivity_shift)
 {
-	s64_t conv_val;
+	int64_t conv_val;
 
-	conv_val = ((s64_t)raw_val * SENSOR_G) >> sensitivity_shift;
+	conv_val = ((int64_t)raw_val * SENSOR_G) >> sensitivity_shift;
 	val->val1 = conv_val / 1000000;
 	val->val2 = conv_val % 1000000;
 }
 
 /* see "Gyroscope Measurements" section from register map description */
-static void mpu6050_convert_gyro(struct sensor_value *val, s16_t raw_val,
-				 u16_t sensitivity_x10)
+static void mpu6050_convert_gyro(struct sensor_value *val, int16_t raw_val,
+				 uint16_t sensitivity_x10)
 {
-	s64_t conv_val;
+	int64_t conv_val;
 
-	conv_val = ((s64_t)raw_val * SENSOR_PI * 10) /
+	conv_val = ((int64_t)raw_val * SENSOR_PI * 10) /
 		   (sensitivity_x10 * 180U);
 	val->val1 = conv_val / 1000000;
 	val->val2 = conv_val % 1000000;
@@ -39,10 +41,10 @@ static void mpu6050_convert_gyro(struct sensor_value *val, s16_t raw_val,
 
 /* see "Temperature Measurement" section from register map description */
 static inline void mpu6050_convert_temp(struct sensor_value *val,
-					s16_t raw_val)
+					int16_t raw_val)
 {
 	val->val1 = raw_val / 340 + 36;
-	val->val2 = ((s64_t)(raw_val % 340) * 1000000) / 340 + 530000;
+	val->val2 = ((int64_t)(raw_val % 340) * 1000000) / 340 + 530000;
 
 	if (val->val2 < 0) {
 		val->val1--;
@@ -110,10 +112,11 @@ static int mpu6050_channel_get(struct device *dev,
 static int mpu6050_sample_fetch(struct device *dev, enum sensor_channel chan)
 {
 	struct mpu6050_data *drv_data = dev->driver_data;
-	s16_t buf[7];
+	const struct mpu6050_config *cfg = dev->config_info;
+	int16_t buf[7];
 
-	if (i2c_burst_read(drv_data->i2c, CONFIG_MPU6050_I2C_ADDR,
-			   MPU6050_REG_DATA_START, (u8_t *)buf, 14) < 0) {
+	if (i2c_burst_read(drv_data->i2c, cfg->i2c_addr,
+			   MPU6050_REG_DATA_START, (uint8_t *)buf, 14) < 0) {
 		LOG_ERR("Failed to read data sample.");
 		return -EIO;
 	}
@@ -140,17 +143,18 @@ static const struct sensor_driver_api mpu6050_driver_api = {
 int mpu6050_init(struct device *dev)
 {
 	struct mpu6050_data *drv_data = dev->driver_data;
-	u8_t id, i;
+	const struct mpu6050_config *cfg = dev->config_info;
+	uint8_t id, i;
 
-	drv_data->i2c = device_get_binding(CONFIG_MPU6050_I2C_MASTER_DEV_NAME);
+	drv_data->i2c = device_get_binding(cfg->i2c_label);
 	if (drv_data->i2c == NULL) {
 		LOG_ERR("Failed to get pointer to %s device",
-			    CONFIG_MPU6050_I2C_MASTER_DEV_NAME);
+			    cfg->i2c_label);
 		return -EINVAL;
 	}
 
 	/* check chip ID */
-	if (i2c_reg_read_byte(drv_data->i2c, CONFIG_MPU6050_I2C_ADDR,
+	if (i2c_reg_read_byte(drv_data->i2c, cfg->i2c_addr,
 			      MPU6050_REG_CHIP_ID, &id) < 0) {
 		LOG_ERR("Failed to read chip ID.");
 		return -EIO;
@@ -162,7 +166,7 @@ int mpu6050_init(struct device *dev)
 	}
 
 	/* wake up chip */
-	if (i2c_reg_update_byte(drv_data->i2c, CONFIG_MPU6050_I2C_ADDR,
+	if (i2c_reg_update_byte(drv_data->i2c, cfg->i2c_addr,
 				MPU6050_REG_PWR_MGMT1, MPU6050_SLEEP_EN,
 				0) < 0) {
 		LOG_ERR("Failed to wake up chip.");
@@ -181,7 +185,7 @@ int mpu6050_init(struct device *dev)
 		return -EINVAL;
 	}
 
-	if (i2c_reg_write_byte(drv_data->i2c, CONFIG_MPU6050_I2C_ADDR,
+	if (i2c_reg_write_byte(drv_data->i2c, cfg->i2c_addr,
 			       MPU6050_REG_ACCEL_CFG,
 			       i << MPU6050_ACCEL_FS_SHIFT) < 0) {
 		LOG_ERR("Failed to write accel full-scale range.");
@@ -202,7 +206,7 @@ int mpu6050_init(struct device *dev)
 		return -EINVAL;
 	}
 
-	if (i2c_reg_write_byte(drv_data->i2c, CONFIG_MPU6050_I2C_ADDR,
+	if (i2c_reg_write_byte(drv_data->i2c, cfg->i2c_addr,
 			       MPU6050_REG_GYRO_CFG,
 			       i << MPU6050_GYRO_FS_SHIFT) < 0) {
 		LOG_ERR("Failed to write gyro full-scale range.");
@@ -221,8 +225,18 @@ int mpu6050_init(struct device *dev)
 	return 0;
 }
 
-struct mpu6050_data mpu6050_driver;
+static struct mpu6050_data mpu6050_driver;
+static const struct mpu6050_config mpu6050_cfg = {
+	.i2c_label = DT_INST_BUS_LABEL(0),
+	.i2c_addr = DT_INST_REG_ADDR(0),
+#ifdef CONFIG_MPU6050_TRIGGER
+	.int_pin = DT_INST_GPIO_PIN(0, int_gpios),
+	.int_flags = DT_INST_GPIO_FLAGS(0, int_gpios),
+	.int_label = DT_INST_GPIO_LABEL(0, int_gpios),
+#endif /* CONFIG_MPU6050_TRIGGER */
+};
 
-DEVICE_AND_API_INIT(mpu6050, CONFIG_MPU6050_NAME, mpu6050_init, &mpu6050_driver,
-		    NULL, POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY,
+DEVICE_AND_API_INIT(mpu6050, DT_INST_LABEL(0),
+		    mpu6050_init, &mpu6050_driver, &mpu6050_cfg,
+		    POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY,
 		    &mpu6050_driver_api);

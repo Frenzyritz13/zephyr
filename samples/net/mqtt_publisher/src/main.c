@@ -10,38 +10,50 @@ LOG_MODULE_REGISTER(net_mqtt_publisher_sample, LOG_LEVEL_DBG);
 #include <zephyr.h>
 #include <net/socket.h>
 #include <net/mqtt.h>
+#include <random/rand32.h>
 
 #include <string.h>
 #include <errno.h>
 
 #include "config.h"
 
+#if defined(CONFIG_USERSPACE)
+#include <app_memory/app_memdomain.h>
+K_APPMEM_PARTITION_DEFINE(app_partition);
+struct k_mem_domain app_domain;
+#define APP_BMEM K_APP_BMEM(app_partition)
+#define APP_DMEM K_APP_DMEM(app_partition)
+#else
+#define APP_BMEM
+#define APP_DMEM
+#endif
+
 /* Buffers for MQTT client. */
-static u8_t rx_buffer[APP_MQTT_BUFFER_SIZE];
-static u8_t tx_buffer[APP_MQTT_BUFFER_SIZE];
+static APP_BMEM uint8_t rx_buffer[APP_MQTT_BUFFER_SIZE];
+static APP_BMEM uint8_t tx_buffer[APP_MQTT_BUFFER_SIZE];
 
 #if defined(CONFIG_MQTT_LIB_WEBSOCKET)
 /* Making RX buffer large enough that the full IPv6 packet can fit into it */
 #define MQTT_LIB_WEBSOCKET_RECV_BUF_LEN 1280
 
 /* Websocket needs temporary buffer to store partial packets */
-static u8_t temp_ws_rx_buf[MQTT_LIB_WEBSOCKET_RECV_BUF_LEN];
+static APP_BMEM uint8_t temp_ws_rx_buf[MQTT_LIB_WEBSOCKET_RECV_BUF_LEN];
 #endif
 
 /* The mqtt client struct */
-static struct mqtt_client client_ctx;
+static APP_BMEM struct mqtt_client client_ctx;
 
 /* MQTT Broker details. */
-static struct sockaddr_storage broker;
+static APP_BMEM struct sockaddr_storage broker;
 
 #if defined(CONFIG_SOCKS)
-static struct sockaddr socks5_proxy;
+static APP_BMEM struct sockaddr socks5_proxy;
 #endif
 
-static struct pollfd fds[1];
-static int nfds;
+static APP_BMEM struct pollfd fds[1];
+static APP_BMEM int nfds;
 
-static bool connected;
+static APP_BMEM bool connected;
 
 #if defined(CONFIG_MQTT_LIB_TLS)
 
@@ -51,7 +63,7 @@ static bool connected;
 #define APP_CA_CERT_TAG 1
 #define APP_PSK_TAG 2
 
-static sec_tag_t m_sec_tags[] = {
+static APP_DMEM sec_tag_t m_sec_tags[] = {
 #if defined(MBEDTLS_X509_CRT_PARSE_C) || defined(CONFIG_NET_SOCKETS_OFFLOAD)
 		APP_CA_CERT_TAG,
 #endif
@@ -113,13 +125,18 @@ static void clear_fds(void)
 	nfds = 0;
 }
 
-static void wait(int timeout)
+static int wait(int timeout)
 {
+	int ret = 0;
+
 	if (nfds > 0) {
-		if (poll(fds, nfds, timeout) < 0) {
+		ret = poll(fds, nfds, timeout);
+		if (ret < 0) {
 			LOG_ERR("poll error: %d", errno);
 		}
 	}
+
+	return ret;
 }
 
 void mqtt_evt_handler(struct mqtt_client *const client,
@@ -187,6 +204,10 @@ void mqtt_evt_handler(struct mqtt_client *const client,
 
 		break;
 
+	case MQTT_EVT_PINGRESP:
+		LOG_INF("PINGRESP packet");
+		break;
+
 	default:
 		break;
 	}
@@ -195,12 +216,12 @@ void mqtt_evt_handler(struct mqtt_client *const client,
 static char *get_mqtt_payload(enum mqtt_qos qos)
 {
 #if APP_BLUEMIX_TOPIC
-	static char payload[30];
+	static APP_BMEM char payload[30];
 
 	snprintk(payload, sizeof(payload), "{d:{temperature:%d}}",
-		 (u8_t)sys_rand32_get());
+		 (uint8_t)sys_rand32_get());
 #else
-	static char payload[] = "DOORS:OPEN_QoSx";
+	static APP_DMEM char payload[] = "DOORS:OPEN_QoSx";
 
 	payload[strlen(payload) - 1] = '0' + qos;
 #endif
@@ -223,7 +244,7 @@ static int publish(struct mqtt_client *client, enum mqtt_qos qos)
 	struct mqtt_publish_param param;
 
 	param.message.topic.qos = qos;
-	param.message.topic.topic.utf8 = (u8_t *)get_mqtt_topic();
+	param.message.topic.topic.utf8 = (uint8_t *)get_mqtt_topic();
 	param.message.topic.topic.size =
 			strlen(param.message.topic.topic.utf8);
 	param.message.payload.data = get_mqtt_payload(qos);
@@ -282,7 +303,7 @@ static void client_init(struct mqtt_client *client)
 	/* MQTT client configuration */
 	client->broker = &broker;
 	client->evt_cb = mqtt_evt_handler;
-	client->client_id.utf8 = (u8_t *)MQTT_CLIENTID;
+	client->client_id.utf8 = (uint8_t *)MQTT_CLIENTID;
 	client->client_id.size = strlen(MQTT_CLIENTID);
 	client->password = NULL;
 	client->user_name = NULL;
@@ -304,7 +325,7 @@ static void client_init(struct mqtt_client *client)
 
 	struct mqtt_sec_config *tls_config = &client->transport.tls.config;
 
-	tls_config->peer_verify = 2;
+	tls_config->peer_verify = TLS_PEER_VERIFY_REQUIRED;
 	tls_config->cipher_list = NULL;
 	tls_config->sec_tag_list = m_sec_tags;
 	tls_config->sec_tag_count = ARRAY_SIZE(m_sec_tags);
@@ -328,7 +349,7 @@ static void client_init(struct mqtt_client *client)
 	client->transport.websocket.config.tmp_buf = temp_ws_rx_buf;
 	client->transport.websocket.config.tmp_buf_len =
 						sizeof(temp_ws_rx_buf);
-	client->transport.websocket.timeout = K_SECONDS(5);
+	client->transport.websocket.timeout = 5 * MSEC_PER_SEC;
 #endif
 
 #if defined(CONFIG_SOCKS)
@@ -351,14 +372,15 @@ static int try_to_connect(struct mqtt_client *client)
 		rc = mqtt_connect(client);
 		if (rc != 0) {
 			PRINT_RESULT("mqtt_connect", rc);
-			k_sleep(APP_SLEEP_MSECS);
+			k_sleep(K_MSEC(APP_SLEEP_MSECS));
 			continue;
 		}
 
 		prepare_fds(client);
 
-		wait(APP_SLEEP_MSECS);
-		mqtt_input(client);
+		if (wait(APP_SLEEP_MSECS)) {
+			mqtt_input(client);
+		}
 
 		if (!connected) {
 			mqtt_abort(client);
@@ -374,23 +396,29 @@ static int try_to_connect(struct mqtt_client *client)
 
 static int process_mqtt_and_sleep(struct mqtt_client *client, int timeout)
 {
-	s64_t remaining = timeout;
-	s64_t start_time = k_uptime_get();
+	int64_t remaining = timeout;
+	int64_t start_time = k_uptime_get();
 	int rc;
 
 	while (remaining > 0 && connected) {
-		wait(remaining);
-
-		rc = mqtt_live(client);
-		if (rc != 0) {
-			PRINT_RESULT("mqtt_live", rc);
-			return rc;
+		if (wait(remaining)) {
+			rc = mqtt_input(client);
+			if (rc != 0) {
+				PRINT_RESULT("mqtt_input", rc);
+				return rc;
+			}
 		}
 
-		rc = mqtt_input(client);
-		if (rc != 0) {
-			PRINT_RESULT("mqtt_input", rc);
+		rc = mqtt_live(client);
+		if (rc != 0 && rc != -EAGAIN) {
+			PRINT_RESULT("mqtt_live", rc);
 			return rc;
+		} else if (rc == 0) {
+			rc = mqtt_input(client);
+			if (rc != 0) {
+				PRINT_RESULT("mqtt_input", rc);
+				return rc;
+			}
 		}
 
 		remaining = timeout + start_time - k_uptime_get();
@@ -399,12 +427,12 @@ static int process_mqtt_and_sleep(struct mqtt_client *client, int timeout)
 	return 0;
 }
 
-#define SUCCESS_OR_EXIT(rc) { if (rc != 0) { return; } }
+#define SUCCESS_OR_EXIT(rc) { if (rc != 0) { return 1; } }
 #define SUCCESS_OR_BREAK(rc) { if (rc != 0) { break; } }
 
-static void publisher(void)
+static int publisher(void)
 {
-	int i, rc;
+	int i, rc, r = 0;
 
 	LOG_INF("attempting to connect: ");
 	rc = try_to_connect(&client_ctx);
@@ -412,7 +440,9 @@ static void publisher(void)
 	SUCCESS_OR_EXIT(rc);
 
 	i = 0;
-	while (i++ < APP_MAX_ITERATIONS && connected) {
+	while (i++ < CONFIG_NET_SAMPLE_APP_MAX_ITERATIONS && connected) {
+		r = -1;
+
 		rc = mqtt_ping(&client_ctx);
 		PRINT_RESULT("mqtt_ping", rc);
 		SUCCESS_OR_BREAK(rc);
@@ -440,17 +470,43 @@ static void publisher(void)
 
 		rc = process_mqtt_and_sleep(&client_ctx, APP_SLEEP_MSECS);
 		SUCCESS_OR_BREAK(rc);
+
+		r = 0;
 	}
 
 	rc = mqtt_disconnect(&client_ctx);
 	PRINT_RESULT("mqtt_disconnect", rc);
 
-	wait(APP_SLEEP_MSECS);
-	rc = mqtt_input(&client_ctx);
-	PRINT_RESULT("mqtt_input", rc);
-
 	LOG_INF("Bye!");
+
+	return r;
 }
+
+static void start_app(void)
+{
+	int r = 0, i = 0;
+
+	while (!CONFIG_NET_SAMPLE_APP_MAX_CONNECTIONS ||
+	       i++ < CONFIG_NET_SAMPLE_APP_MAX_CONNECTIONS) {
+		r = publisher();
+
+		if (!CONFIG_NET_SAMPLE_APP_MAX_CONNECTIONS) {
+			k_sleep(K_MSEC(5000));
+		}
+	}
+}
+
+#if defined(CONFIG_USERSPACE)
+#define STACK_SIZE 2048
+#define THREAD_PRIORITY K_PRIO_COOP(8)
+
+K_THREAD_DEFINE(app_thread, STACK_SIZE,
+		start_app, NULL, NULL, NULL,
+		THREAD_PRIORITY, K_USER, -1);
+
+static K_MEM_POOL_DEFINE(app_mem_pool, sizeof(uintptr_t), 1024,
+			 2, sizeof(uintptr_t));
+#endif
 
 void main(void)
 {
@@ -461,8 +517,21 @@ void main(void)
 	PRINT_RESULT("tls_init", rc);
 #endif
 
-	while (1) {
-		publisher();
-		k_sleep(K_MSEC(5000));
-	}
+#if defined(CONFIG_USERSPACE)
+	struct k_mem_partition *parts[] = {
+#if Z_LIBC_PARTITION_EXISTS
+		&z_libc_partition,
+#endif
+		&app_partition
+	};
+
+	k_mem_domain_init(&app_domain, ARRAY_SIZE(parts), parts);
+	k_mem_domain_add_thread(&app_domain, app_thread);
+	k_thread_resource_pool_assign(app_thread, &app_mem_pool);
+
+	k_thread_start(app_thread);
+	k_thread_join(app_thread, K_FOREVER);
+#else
+	start_app();
+#endif
 }

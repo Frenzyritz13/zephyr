@@ -22,8 +22,9 @@
  * completeness.
  */
 
+#include <kernel.h>
+#include <kernel_arch_data.h>
 #include <gen_offset.h>
-#include <kernel_structs.h>
 #include <kernel_offsets.h>
 
 GEN_OFFSET_SYM(_thread_arch_t, relinquish_cause);
@@ -35,6 +36,11 @@ GEN_OFFSET_SYM(_thread_arch_t, u_stack_base);
 GEN_OFFSET_SYM(_thread_arch_t, u_stack_top);
 #endif
 #endif
+
+#ifdef CONFIG_USERSPACE
+GEN_OFFSET_SYM(_thread_arch_t, priv_stack_start);
+#endif
+
 
 /* ARCv2-specific IRQ stack frame structure member offsets */
 GEN_OFFSET_SYM(_isf_t, r0);
@@ -98,7 +104,7 @@ GEN_OFFSET_SYM(_callee_saved_stack_t, r30);
 GEN_OFFSET_SYM(_callee_saved_stack_t, r58);
 GEN_OFFSET_SYM(_callee_saved_stack_t, r59);
 #endif
-#ifdef CONFIG_FP_SHARING
+#ifdef CONFIG_FPU_SHARING
 GEN_OFFSET_SYM(_callee_saved_stack_t, fpu_status);
 GEN_OFFSET_SYM(_callee_saved_stack_t, fpu_ctrl);
 #ifdef CONFIG_FP_FPU_DA

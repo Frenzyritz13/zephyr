@@ -8,6 +8,8 @@ documentation on your local system using the same documentation sources
 as we use to create the online documentation found at
 https://docs.zephyrproject.org
 
+.. _documentation-overview:
+
 Documentation overview
 **********************
 
@@ -44,6 +46,8 @@ The reStructuredText files are processed by the Sphinx documentation system,
 and make use of the breathe extension for including the doxygen-generated API
 material.  Additional tools are required to generate the
 documentation locally, as described in the following sections.
+
+.. _documentation-processors:
 
 Installing the documentation processors
 ***************************************
@@ -114,12 +118,11 @@ Documentation presentation theme
 ********************************
 
 Sphinx supports easy customization of the generated documentation
-appearance through the use of themes.  Replace the theme files and do
+appearance through the use of themes. Replace the theme files and do
 another ``make htmldocs`` and the output layout and style is changed.
 The ``read-the-docs`` theme is installed as part of the
-``requirements.txt`` list above, and will be used if it's available, for
-local doc generation.
-
+:ref:`install_py_requirements` step you took in the getting started
+guide.
 
 Running the documentation processors
 ************************************
@@ -133,16 +136,15 @@ folder, here are the commands to generate the html content locally:
 .. code-block:: console
 
    # On Linux/macOS
-   cd ~/zephyr
-   source zephyr-env.sh
-   mkdir -p doc/_build && cd doc/_build
+   cd ~/zephyr/doc
    # On Windows
-   cd %userprofile%\zephyr
-   zephyr-env.cmd
-   mkdir doc\_build & cd doc/_build
+   cd %userprofile%\zephyr\doc
 
    # Use cmake to configure a Ninja-based build system:
-   cmake -GNinja ..
+   cmake -GNinja -B_build .
+
+   # Enter the build directory
+   cd _build
 
    # To generate HTML output, run ninja on the generated build system:
    ninja htmldocs
@@ -182,7 +184,6 @@ there:
 .. code-block:: console
 
    cd ~/zephyr
-   source zephyr-env.sh
 
    # To generate HTML output
    make htmldocs
@@ -228,7 +229,6 @@ To enable this mode, set the following option when invoking cmake::
 or invoke make with the following target::
 
    cd ~/zephyr
-   source zephyr-env.sh
 
    # To generate HTML output without detailed Kconfig
    make htmldocs-fast

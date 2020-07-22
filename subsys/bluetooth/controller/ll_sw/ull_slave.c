@@ -12,8 +12,9 @@
 #include "util/memq.h"
 #include "util/mayfly.h"
 
-#include "hal/ticker.h"
 #include "hal/ccm.h"
+#include "hal/radio.h"
+#include "hal/ticker.h"
 
 #include "ticker/ticker.h"
 
@@ -37,33 +38,34 @@
 #include "ull_conn_internal.h"
 #include "ull_slave_internal.h"
 
-#define LOG_MODULE_NAME bt_ctlr_llsw_ull_slave
+#define BT_DBG_ENABLED IS_ENABLED(CONFIG_BT_DEBUG_HCI_DRIVER)
+#define LOG_MODULE_NAME bt_ctlr_ull_slave
 #include "common/log.h"
 #include <soc.h>
 #include "hal/debug.h"
 
-static void ticker_op_stop_adv_cb(u32_t status, void *param);
-static void ticker_op_cb(u32_t status, void *param);
+static void ticker_op_stop_adv_cb(uint32_t status, void *param);
+static void ticker_op_cb(uint32_t status, void *param);
 
 void ull_slave_setup(memq_link_t *link, struct node_rx_hdr *rx,
 		     struct node_rx_ftr *ftr, struct lll_conn *lll)
 {
-	u32_t conn_offset_us, conn_interval_us;
-	u8_t ticker_id_adv, ticker_id_conn;
-	u8_t peer_addr[BDADDR_SIZE];
-	u32_t ticks_slot_overhead;
-	u32_t mayfly_was_enabled;
-	u32_t ticks_slot_offset;
+	uint32_t conn_offset_us, conn_interval_us;
+	uint8_t ticker_id_adv, ticker_id_conn;
+	uint8_t peer_addr[BDADDR_SIZE];
+	uint32_t ticks_slot_overhead;
+	uint32_t ticks_slot_offset;
 	struct pdu_adv *pdu_adv;
 	struct ll_adv_set *adv;
 	struct node_rx_cc *cc;
 	struct ll_conn *conn;
-	u32_t ticker_status;
-	u8_t peer_addr_type;
-	u16_t win_offset;
-	u16_t timeout;
-	u16_t interval;
-	u8_t chan_sel;
+	uint32_t ready_delay_us;
+	uint32_t ticker_status;
+	uint8_t peer_addr_type;
+	uint16_t win_offset;
+	uint16_t timeout;
+	uint16_t interval;
+	uint8_t chan_sel;
 
 	((struct lll_adv *)ftr->param)->conn = NULL;
 
@@ -78,7 +80,13 @@ void ull_slave_setup(memq_link_t *link, struct node_rx_hdr *rx,
 	       sizeof(lll->data_chan_map));
 	lll->data_chan_count = util_ones_count_get(&lll->data_chan_map[0],
 			       sizeof(lll->data_chan_map));
+	if (lll->data_chan_count < 2) {
+		return;
+	}
 	lll->data_chan_hop = pdu_adv->connect_ind.hop;
+	if ((lll->data_chan_hop < 5) || (lll->data_chan_hop > 16)) {
+		return;
+	}
 	interval = sys_le16_to_cpu(pdu_adv->connect_ind.interval);
 	lll->interval = interval;
 	lll->latency = sys_le16_to_cpu(pdu_adv->connect_ind.latency);
@@ -119,14 +127,6 @@ void ull_slave_setup(memq_link_t *link, struct node_rx_hdr *rx,
 	memcpy((void *)&conn->slave.force, &lll->access_addr[0],
 	       sizeof(conn->slave.force));
 
-#if defined(CONFIG_BT_CTLR_PRIVACY)
-	u8_t own_addr_type = pdu_adv->rx_addr;
-	u8_t own_addr[BDADDR_SIZE];
-	u8_t rl_idx = ftr->rl_idx;
-
-	memcpy(own_addr, &pdu_adv->connect_ind.adv_addr[0], BDADDR_SIZE);
-#endif
-
 	peer_addr_type = pdu_adv->tx_addr;
 	memcpy(peer_addr, pdu_adv->connect_ind.init_addr, BDADDR_SIZE);
 
@@ -137,8 +137,14 @@ void ull_slave_setup(memq_link_t *link, struct node_rx_hdr *rx,
 	cc->role = 1U;
 
 #if defined(CONFIG_BT_CTLR_PRIVACY)
-	cc->own_addr_type = own_addr_type;
-	memcpy(&cc->own_addr[0], &own_addr[0], BDADDR_SIZE);
+	uint8_t rl_idx = ftr->rl_idx;
+
+	if (ull_filter_lll_lrpa_used(adv->lll.rl_idx)) {
+		memcpy(&cc->local_rpa[0], &pdu_adv->connect_ind.adv_addr[0],
+		       BDADDR_SIZE);
+	} else {
+		memset(&cc->local_rpa[0], 0x0, BDADDR_SIZE);
+	}
 
 	if (rl_idx != FILTER_IDX_NONE) {
 		/* TODO: store rl_idx instead if safe */
@@ -167,6 +173,10 @@ void ull_slave_setup(memq_link_t *link, struct node_rx_hdr *rx,
 	lll->handle = ll_conn_handle_get(conn);
 	rx->handle = lll->handle;
 
+#if defined(CONFIG_BT_CTLR_TX_PWR_DYNAMIC_CONTROL)
+	lll->tx_pwr_lvl = RADIO_TXP_DEFAULT;
+#endif /* CONFIG_BT_CTLR_TX_PWR_DYNAMIC_CONTROL */
+
 	/* Use Channel Selection Algorithm #2 if peer too supports it */
 	if (IS_ENABLED(CONFIG_BT_CTLR_CHAN_SEL_2)) {
 		struct node_rx_pdu *rx_csa;
@@ -190,9 +200,9 @@ void ull_slave_setup(memq_link_t *link, struct node_rx_hdr *rx,
 		cs = (void *)rx_csa->pdu;
 
 		if (chan_sel) {
-			u16_t aa_ls = ((u16_t)lll->access_addr[1] << 8) |
+			uint16_t aa_ls = ((uint16_t)lll->access_addr[1] << 8) |
 				      lll->access_addr[0];
-			u16_t aa_ms = ((u16_t)lll->access_addr[3] << 8) |
+			uint16_t aa_ms = ((uint16_t)lll->access_addr[3] << 8) |
 				      lll->access_addr[2];
 
 			lll->data_chan_sel = 1;
@@ -207,6 +217,12 @@ void ull_slave_setup(memq_link_t *link, struct node_rx_hdr *rx,
 	ll_rx_put(link, rx);
 	ll_rx_sched();
 
+#if defined(CONFIG_BT_CTLR_PHY)
+	ready_delay_us = lll_radio_rx_ready_delay_get(lll->phy_rx, 1);
+#else
+	ready_delay_us = lll_radio_rx_ready_delay_get(0, 0);
+#endif
+
 	/* TODO: active_to_start feature port */
 	conn->evt.ticks_active_to_start = 0U;
 	conn->evt.ticks_xtal_to_start =
@@ -215,8 +231,8 @@ void ull_slave_setup(memq_link_t *link, struct node_rx_hdr *rx,
 		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_PREEMPT_MIN_US);
 	conn->evt.ticks_slot =
 		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_START_US +
-				       ftr->us_radio_rdy + 328 + EVENT_IFS_US +
-				       328);
+				       ready_delay_us +
+				       328 + EVENT_IFS_US + 328);
 
 	ticks_slot_offset = MAX(conn->evt.ticks_active_to_start,
 				conn->evt.ticks_xtal_to_start);
@@ -229,19 +245,17 @@ void ull_slave_setup(memq_link_t *link, struct node_rx_hdr *rx,
 
 	conn_interval_us -= lll->slave.window_widening_periodic_us;
 
-	conn_offset_us = ftr->us_radio_end;
-	conn_offset_us += ((u64_t)win_offset + 1) * 1250U;
+	conn_offset_us = ftr->radio_end_us;
+	conn_offset_us += ((uint64_t)win_offset + 1) * 1250U;
 	conn_offset_us -= EVENT_OVERHEAD_START_US;
 	conn_offset_us -= EVENT_TICKER_RES_MARGIN_US;
 	conn_offset_us -= EVENT_JITTER_US;
-	conn_offset_us -= ftr->us_radio_rdy;
+	conn_offset_us -= ready_delay_us;
 
 #if (CONFIG_BT_CTLR_ULL_HIGH_PRIO == CONFIG_BT_CTLR_ULL_LOW_PRIO)
 	/* disable ticker job, in order to chain stop and start to avoid RTC
 	 * being stopped if no tickers active.
 	 */
-	mayfly_was_enabled = mayfly_is_enabled(TICKER_USER_ID_ULL_HIGH,
-					       TICKER_USER_ID_ULL_LOW);
 	mayfly_enable(TICKER_USER_ID_ULL_HIGH, TICKER_USER_ID_ULL_LOW, 0);
 #endif
 
@@ -284,13 +298,10 @@ void ull_slave_setup(memq_link_t *link, struct node_rx_hdr *rx,
 		  (ticker_status == TICKER_STATUS_BUSY));
 
 #if (CONFIG_BT_CTLR_ULL_HIGH_PRIO == CONFIG_BT_CTLR_ULL_LOW_PRIO)
-	/* enable ticker job, if disabled in this function */
-	if (mayfly_was_enabled) {
-		mayfly_enable(TICKER_USER_ID_ULL_HIGH, TICKER_USER_ID_ULL_LOW,
-			      1);
-	}
-#else
-	ARG_UNUSED(mayfly_was_enabled);
+	/* enable ticker job, irrespective of disabled in this function so
+	 * first connection event can be scheduled as soon as possible.
+	 */
+	mayfly_enable(TICKER_USER_ID_ULL_HIGH, TICKER_USER_ID_ULL_LOW, 1);
 #endif
 }
 
@@ -301,13 +312,13 @@ void ull_slave_setup(memq_link_t *link, struct node_rx_hdr *rx,
  * @param ticks_drift_plus[out]  Positive part of drift uncertainty window
  * @param ticks_drift_minus[out] Negative part of drift uncertainty window
  */
-void ull_slave_done(struct node_rx_event_done *done, u32_t *ticks_drift_plus,
-		    u32_t *ticks_drift_minus)
+void ull_slave_done(struct node_rx_event_done *done, uint32_t *ticks_drift_plus,
+		    uint32_t *ticks_drift_minus)
 {
-	u32_t start_to_address_expected_us;
-	u32_t start_to_address_actual_us;
-	u32_t window_widening_event_us;
-	u32_t preamble_to_addr_us;
+	uint32_t start_to_address_expected_us;
+	uint32_t start_to_address_actual_us;
+	uint32_t window_widening_event_us;
+	uint32_t preamble_to_addr_us;
 
 	start_to_address_actual_us =
 		done->extra.slave.start_to_address_actual_us;
@@ -337,23 +348,30 @@ void ull_slave_done(struct node_rx_event_done *done, u32_t *ticks_drift_plus,
 	}
 }
 
-void ull_slave_ticker_cb(u32_t ticks_at_expire, u32_t remainder, u16_t lazy,
+void ull_slave_ticker_cb(uint32_t ticks_at_expire, uint32_t remainder, uint16_t lazy,
 			 void *param)
 {
 	static memq_link_t link;
 	static struct mayfly mfy = {0, 0, &link, NULL, lll_slave_prepare};
 	static struct lll_prepare_param p;
 	struct ll_conn *conn = param;
-	u32_t err;
-	u8_t ref;
-	int ret;
+	uint32_t err;
+	uint8_t ref;
 
 	DEBUG_RADIO_PREPARE_S(1);
 
-	/* Handle any LL Control Procedures */
-	ret = ull_conn_llcp(conn, ticks_at_expire, lazy);
-	if (ret) {
-		return;
+	/* If this is a must-expire callback, LLCP state machine does not need
+	 * to know. Will be called with lazy > 0 when scheduled in air.
+	 */
+	if (!IS_ENABLED(CONFIG_BT_CTLR_CONN_META) ||
+	    (lazy != TICKER_LAZY_MUST_EXPIRE)) {
+		int ret;
+
+		/* Handle any LL Control Procedures */
+		ret = ull_conn_llcp(conn, ticks_at_expire, lazy);
+		if (ret) {
+			return;
+		}
 	}
 
 	/* Increment prepare reference count */
@@ -382,11 +400,10 @@ void ull_slave_ticker_cb(u32_t ticks_at_expire, u32_t remainder, u16_t lazy,
 }
 
 #if defined(CONFIG_BT_CTLR_LE_ENC)
-u8_t ll_start_enc_req_send(u16_t handle, u8_t error_code,
-			    u8_t const *const ltk)
+uint8_t ll_start_enc_req_send(uint16_t handle, uint8_t error_code,
+			    uint8_t const *const ltk)
 {
 	struct ll_conn *conn;
-	u8_t ret;
 
 	conn = ll_connected_get(handle);
 	if (!conn) {
@@ -395,16 +412,13 @@ u8_t ll_start_enc_req_send(u16_t handle, u8_t error_code,
 
 	if (error_code) {
 		if (conn->llcp_enc.refresh == 0U) {
-			ret = ull_conn_llcp_req(conn);
-			if (ret) {
-				return ret;
+			if ((conn->llcp_req == conn->llcp_ack) ||
+			     (conn->llcp_type != LLCP_ENCRYPTION)) {
+				return BT_HCI_ERR_CMD_DISALLOWED;
 			}
 
 			conn->llcp.encryption.error_code = error_code;
-			conn->llcp.encryption.initiate = 0U;
-
-			conn->llcp_type = LLCP_ENCRYPTION;
-			conn->llcp_req++;
+			conn->llcp.encryption.state = LLCP_ENC_STATE_INPROG;
 		} else {
 			if (conn->llcp_terminate.ack !=
 			    conn->llcp_terminate.req) {
@@ -416,31 +430,29 @@ u8_t ll_start_enc_req_send(u16_t handle, u8_t error_code,
 			conn->llcp_terminate.req++;
 		}
 	} else {
-		ret = ull_conn_llcp_req(conn);
-		if (ret) {
-			return ret;
+		if ((conn->llcp_req == conn->llcp_ack) ||
+		     (conn->llcp_type != LLCP_ENCRYPTION)) {
+			return BT_HCI_ERR_CMD_DISALLOWED;
 		}
 
-		memcpy(&conn->llcp_enc.ltk[0], ltk, sizeof(conn->llcp_enc.ltk));
+		memcpy(&conn->llcp_enc.ltk[0], ltk,
+		       sizeof(conn->llcp_enc.ltk));
 
 		conn->llcp.encryption.error_code = 0U;
-		conn->llcp.encryption.initiate = 0U;
-
-		conn->llcp_type = LLCP_ENCRYPTION;
-		conn->llcp_req++;
+		conn->llcp.encryption.state = LLCP_ENC_STATE_INPROG;
 	}
 
 	return 0;
 }
 #endif /* CONFIG_BT_CTLR_LE_ENC */
 
-static void ticker_op_stop_adv_cb(u32_t status, void *param)
+static void ticker_op_stop_adv_cb(uint32_t status, void *param)
 {
 	LL_ASSERT(status != TICKER_STATUS_FAILURE ||
 		  param == ull_disable_mark_get());
 }
 
-static void ticker_op_cb(u32_t status, void *param)
+static void ticker_op_cb(uint32_t status, void *param)
 {
 	ARG_UNUSED(param);
 

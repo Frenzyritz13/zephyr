@@ -8,11 +8,22 @@ Note that common helpers used by the flash and debug extension
 commands are in run_common -- that's for common code used by
 commands which specifically execute runners.'''
 
+import os
+from pathlib import Path
+
 from west import log
 from west.commands import WestCommand
 
 from runners.core import RunnerConfig
 
+# This relies on this file being zephyr/scripts/foo/bar.py.
+# If you move this file, you'll break it, so be careful.
+THIS_ZEPHYR = Path(__file__).parent.parent.parent
+ZEPHYR_BASE = Path(os.environ.get('ZEPHYR_BASE', THIS_ZEPHYR))
+
+# FIXME we need a nicer way to handle imports from scripts and cmake than this.
+ZEPHYR_SCRIPTS = ZEPHYR_BASE / 'scripts'
+ZEPHYR_CMAKE = ZEPHYR_BASE / 'cmake'
 
 class Forceable(WestCommand):
     '''WestCommand subclass for commands with a --force option.'''
@@ -21,7 +32,7 @@ class Forceable(WestCommand):
     def add_force_arg(parser):
         '''Add a -f / --force option to the parser.'''
         parser.add_argument('-f', '--force', action='store_true',
-                            help='Ignore any errors and try to proceed')
+                            help='ignore any errors and try to proceed')
 
     def check_force(self, cond, msg):
         '''Abort if the command needs to be forced and hasn't been.

@@ -11,9 +11,9 @@
 #include <logging/log.h>
 LOG_MODULE_DECLARE(power, CONFIG_SYS_PM_LOG_LEVEL);
 
-enum power_states sys_pm_policy_next_state(s32_t ticks)
+enum power_states sys_pm_policy_next_state(int32_t ticks)
 {
-	static u8_t cur_power_state;
+	static uint8_t cur_power_state;
 	int i = cur_power_state;
 
 	if (SYS_POWER_STATE_MAX == 0) {
@@ -37,4 +37,9 @@ enum power_states sys_pm_policy_next_state(s32_t ticks)
 
 	LOG_DBG("No suitable power state found!");
 	return SYS_POWER_STATE_ACTIVE;
+}
+
+__weak bool sys_pm_policy_low_power_devices(enum power_states pm_state)
+{
+	return sys_pm_is_sleep_state(pm_state);
 }

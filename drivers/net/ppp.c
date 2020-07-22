@@ -27,13 +27,16 @@ LOG_MODULE_REGISTER(net_ppp, LOG_LEVEL);
 #include <net/net_pkt.h>
 #include <net/net_if.h>
 #include <net/net_core.h>
-#include <console/uart_pipe.h>
-#include <crc.h>
+#include <sys/ring_buffer.h>
+#include <sys/crc.h>
+#include <drivers/uart.h>
+#include <drivers/console/uart_mux.h>
+#include <random/rand32.h>
 
 #include "../../subsys/net/ip/net_stats.h"
 #include "../../subsys/net/ip/net_private.h"
 
-#define UART_BUF_LEN CONFIG_NET_PPP_UART_PIPE_BUF_LEN
+#define UART_BUF_LEN CONFIG_NET_PPP_UART_BUF_LEN
 
 enum ppp_driver_state {
 	STATE_HDLC_FRAME_START,
@@ -41,7 +44,13 @@ enum ppp_driver_state {
 	STATE_HDLC_FRAME_DATA,
 };
 
+#define PPP_WORKQ_PRIORITY CONFIG_NET_PPP_RX_PRIORITY
+#define PPP_WORKQ_STACK_SIZE CONFIG_NET_PPP_RX_STACK_SIZE
+
+K_THREAD_STACK_DEFINE(ppp_workq, PPP_WORKQ_STACK_SIZE);
+
 struct ppp_driver_context {
+	struct device *dev;
 	struct net_if *iface;
 
 	/* This net_pkt contains pkt that is being read */
@@ -51,27 +60,42 @@ struct ppp_driver_context {
 	size_t available;
 
 	/* ppp data is read into this buf */
-	u8_t buf[UART_BUF_LEN];
+	uint8_t buf[UART_BUF_LEN];
 
 	/* ppp buf use when sending data */
-	u8_t send_buf[UART_BUF_LEN];
+	uint8_t send_buf[UART_BUF_LEN];
 
-	u8_t mac_addr[6];
+	uint8_t mac_addr[6];
 	struct net_linkaddr ll_addr;
+
+	/* Flag that tells whether this instance is initialized or not */
+	atomic_t modem_init_done;
+
+	/* Incoming data is routed via ring buffer */
+	struct ring_buf rx_ringbuf;
+	uint8_t rx_buf[CONFIG_NET_PPP_RINGBUF_SIZE];
+
+	/* ISR function callback worker */
+	struct k_work cb_work;
+	struct k_work_q cb_workq;
 
 #if defined(CONFIG_NET_STATISTICS_PPP)
 	struct net_stats_ppp stats;
 #endif
-
 	enum ppp_driver_state state;
 
-	u8_t init_done : 1;
-	u8_t next_escaped : 1;
+#if defined(CONFIG_PPP_CLIENT_CLIENTSERVER)
+	/* correctly received CLIENT bytes */
+	uint8_t client_index;
+#endif
+
+	uint8_t init_done : 1;
+	uint8_t next_escaped : 1;
 };
 
 static struct ppp_driver_context ppp_driver_context_data;
 
-static int ppp_save_byte(struct ppp_driver_context *ppp, u8_t byte)
+static int ppp_save_byte(struct ppp_driver_context *ppp, uint8_t byte)
 {
 	int ret;
 
@@ -168,7 +192,70 @@ static void ppp_change_state(struct ppp_driver_context *ctx,
 	ctx->state = new_state;
 }
 
-static int ppp_input_byte(struct ppp_driver_context *ppp, u8_t byte)
+static int ppp_send_flush(struct ppp_driver_context *ppp, int off)
+{
+	if (!IS_ENABLED(CONFIG_NET_TEST)) {
+		uint8_t *buf = ppp->send_buf;
+
+		while (off--) {
+			uart_poll_out(ppp->dev, *buf++);
+		}
+	}
+
+	return 0;
+}
+
+static int ppp_send_bytes(struct ppp_driver_context *ppp,
+			  const uint8_t *data, int len, int off)
+{
+	int i;
+
+	for (i = 0; i < len; i++) {
+		ppp->send_buf[off++] = data[i];
+
+		if (off >= sizeof(ppp->send_buf)) {
+			off = ppp_send_flush(ppp, off);
+		}
+	}
+
+	return off;
+}
+
+#if defined(CONFIG_PPP_CLIENT_CLIENTSERVER)
+
+#define CLIENT "CLIENT"
+#define CLIENTSERVER "CLIENTSERVER"
+
+static void ppp_handle_client(struct ppp_driver_context *ppp, uint8_t byte)
+{
+	static const char *client = CLIENT;
+	static const char *clientserver = CLIENTSERVER;
+	int offset;
+
+	if (ppp->client_index >= (sizeof(CLIENT) - 1)) {
+		ppp->client_index = 0;
+	}
+
+	if (byte != client[ppp->client_index]) {
+		ppp->client_index = 0;
+		if (byte != client[ppp->client_index]) {
+			return;
+		}
+	}
+
+	++ppp->client_index;
+	if (ppp->client_index >= (sizeof(CLIENT) - 1)) {
+		LOG_DBG("Received complete CLIENT string");
+		offset = ppp_send_bytes(ppp, clientserver,
+					sizeof(CLIENTSERVER) - 1, 0);
+		(void)ppp_send_flush(ppp, offset);
+		ppp->client_index = 0;
+	}
+
+}
+#endif
+
+static int ppp_input_byte(struct ppp_driver_context *ppp, uint8_t byte)
 {
 	int ret = -EAGAIN;
 
@@ -179,6 +266,10 @@ static int ppp_input_byte(struct ppp_driver_context *ppp, u8_t byte)
 			/* Note that we do not save the sync flag */
 			LOG_DBG("Sync byte (0x%02x) start", byte);
 			ppp_change_state(ppp, STATE_HDLC_FRAME_ADDRESS);
+#if defined(CONFIG_PPP_CLIENT_CLIENTSERVER)
+		} else {
+			ppp_handle_client(ppp, byte);
+#endif
 		}
 
 		break;
@@ -259,7 +350,7 @@ static int ppp_input_byte(struct ppp_driver_context *ppp, u8_t byte)
 static bool ppp_check_fcs(struct ppp_driver_context *ppp)
 {
 	struct net_buf *buf;
-	u16_t crc;
+	uint16_t crc;
 
 	buf = ppp->pkt->buffer;
 	if (!buf) {
@@ -303,7 +394,7 @@ static void ppp_process_msg(struct ppp_driver_context *ppp)
 		 * FCS fields (16-bit) as the PPP L2 layer does not need
 		 * those bytes.
 		 */
-		u16_t addr_and_ctrl = net_buf_pull_be16(ppp->pkt->buffer);
+		uint16_t addr_and_ctrl = net_buf_pull_be16(ppp->pkt->buffer);
 
 		/* Currently we do not support compressed Address and Control
 		 * fields so they must always be present.
@@ -333,7 +424,8 @@ static void ppp_process_msg(struct ppp_driver_context *ppp)
 	ppp->pkt = NULL;
 }
 
-static u8_t *ppp_recv_cb(u8_t *buf, size_t *off)
+#if defined(CONFIG_NET_TEST)
+static uint8_t *ppp_recv_cb(uint8_t *buf, size_t *off)
 {
 	struct ppp_driver_context *ppp =
 		CONTAINER_OF(buf, struct ppp_driver_context, buf);
@@ -367,8 +459,7 @@ static u8_t *ppp_recv_cb(u8_t *buf, size_t *off)
 	return buf;
 }
 
-#if defined(CONFIG_NET_TEST)
-void ppp_driver_feed_data(u8_t *data, int data_len)
+void ppp_driver_feed_data(uint8_t *data, int data_len)
 {
 	struct ppp_driver_context *ppp = &ppp_driver_context_data;
 	size_t recv_off = 0;
@@ -402,11 +493,11 @@ void ppp_driver_feed_data(u8_t *data, int data_len)
 }
 #endif
 
-static bool calc_fcs(struct net_pkt *pkt, u16_t *fcs, u16_t protocol)
+static bool calc_fcs(struct net_pkt *pkt, uint16_t *fcs, uint16_t protocol)
 {
 	struct net_buf *buf;
-	u16_t crc;
-	u16_t c;
+	uint16_t crc;
+	uint16_t c;
 
 	buf = pkt->buffer;
 	if (!buf) {
@@ -416,10 +507,10 @@ static bool calc_fcs(struct net_pkt *pkt, u16_t *fcs, u16_t protocol)
 	/* HDLC Address and Control fields */
 	c = sys_cpu_to_be16(0xff << 8 | 0x03);
 
-	crc = crc16_ccitt(0xffff, (const u8_t *)&c, sizeof(c));
+	crc = crc16_ccitt(0xffff, (const uint8_t *)&c, sizeof(c));
 
 	if (protocol > 0) {
-		crc = crc16_ccitt(crc, (const u8_t *)&protocol,
+		crc = crc16_ccitt(crc, (const uint8_t *)&protocol,
 				  sizeof(protocol));
 	}
 
@@ -434,32 +525,7 @@ static bool calc_fcs(struct net_pkt *pkt, u16_t *fcs, u16_t protocol)
 	return true;
 }
 
-static int ppp_send_flush(struct ppp_driver_context *ppp, int off)
-{
-	if (!IS_ENABLED(CONFIG_NET_TEST)) {
-		uart_pipe_send(ppp->send_buf, off);
-	}
-
-	return 0;
-}
-
-static int ppp_send_bytes(struct ppp_driver_context *ppp,
-			  const u8_t *data, int len, int off)
-{
-	int i;
-
-	for (i = 0; i < len; i++) {
-		ppp->send_buf[off++] = data[i];
-
-		if (off >= sizeof(ppp->send_buf)) {
-			off = ppp_send_flush(ppp, off);
-		}
-	}
-
-	return off;
-}
-
-static u16_t ppp_escape_byte(u8_t byte, int *offset)
+static uint16_t ppp_escape_byte(uint8_t byte, int *offset)
 {
 	if (byte == 0x7e || byte == 0x7d || byte < 0x20) {
 		*offset = 0;
@@ -474,11 +540,11 @@ static int ppp_send(struct device *dev, struct net_pkt *pkt)
 {
 	struct ppp_driver_context *ppp = dev->driver_data;
 	struct net_buf *buf = pkt->buffer;
-	u16_t protocol = 0;
+	uint16_t protocol = 0;
 	int send_off = 0;
-	u32_t sync_addr_ctrl;
-	u16_t fcs, escaped;
-	u8_t byte;
+	uint32_t sync_addr_ctrl;
+	uint16_t fcs, escaped;
+	uint8_t byte;
 	int i, offset;
 
 #if defined(CONFIG_NET_TEST)
@@ -512,17 +578,17 @@ static int ppp_send(struct device *dev, struct net_pkt *pkt)
 	/* Sync, Address & Control fields */
 	sync_addr_ctrl = sys_cpu_to_be32(0x7e << 24 | 0xff << 16 |
 					 0x7d << 8 | 0x23);
-	send_off = ppp_send_bytes(ppp, (const u8_t *)&sync_addr_ctrl,
+	send_off = ppp_send_bytes(ppp, (const uint8_t *)&sync_addr_ctrl,
 				  sizeof(sync_addr_ctrl), send_off);
 
 	if (protocol > 0) {
 		escaped = htons(ppp_escape_byte(protocol, &offset));
-		send_off = ppp_send_bytes(ppp, (u8_t *)&escaped + offset,
+		send_off = ppp_send_bytes(ppp, (uint8_t *)&escaped + offset,
 					  offset ? 1 : 2,
 					  send_off);
 
 		escaped = htons(ppp_escape_byte(protocol >> 8, &offset));
-		send_off = ppp_send_bytes(ppp, (u8_t *)&escaped + offset,
+		send_off = ppp_send_bytes(ppp, (uint8_t *)&escaped + offset,
 					  offset ? 1 : 2,
 					  send_off);
 	}
@@ -540,7 +606,7 @@ static int ppp_send(struct device *dev, struct net_pkt *pkt)
 			/* Escape illegal bytes */
 			escaped = htons(ppp_escape_byte(buf->data[i], &offset));
 			send_off = ppp_send_bytes(ppp,
-						  (u8_t *)&escaped + offset,
+						  (uint8_t *)&escaped + offset,
 						  offset ? 1 : 2,
 						  send_off);
 		}
@@ -549,12 +615,12 @@ static int ppp_send(struct device *dev, struct net_pkt *pkt)
 	}
 
 	escaped = htons(ppp_escape_byte(fcs, &offset));
-	send_off = ppp_send_bytes(ppp, (u8_t *)&escaped + offset,
+	send_off = ppp_send_bytes(ppp, (uint8_t *)&escaped + offset,
 				  offset ? 1 : 2,
 				  send_off);
 
 	escaped = htons(ppp_escape_byte(fcs >> 8, &offset));
-	send_off = ppp_send_bytes(ppp, (u8_t *)&escaped + offset,
+	send_off = ppp_send_bytes(ppp, (uint8_t *)&escaped + offset,
 				  offset ? 1 : 2,
 				  send_off);
 
@@ -566,14 +632,77 @@ static int ppp_send(struct device *dev, struct net_pkt *pkt)
 	return 0;
 }
 
+#if !defined(CONFIG_NET_TEST)
+static int ppp_consume_ringbuf(struct ppp_driver_context *ppp)
+{
+	uint8_t *data;
+	size_t len, tmp;
+	int ret;
+
+	len = ring_buf_get_claim(&ppp->rx_ringbuf, &data,
+				 CONFIG_NET_PPP_RINGBUF_SIZE);
+	if (len == 0) {
+		LOG_DBG("Ringbuf %p is empty!", &ppp->rx_ringbuf);
+		return 0;
+	}
+
+	/* This will print too much data, enable only if really needed */
+	if (0) {
+		LOG_HEXDUMP_DBG(data, len, ppp->dev->name);
+	}
+
+	tmp = len;
+
+	do {
+		if (ppp_input_byte(ppp, *data++) == 0) {
+			/* Ignore empty or too short frames */
+			if (ppp->pkt && net_pkt_get_len(ppp->pkt) > 3) {
+				ppp_process_msg(ppp);
+			}
+		}
+	} while (--tmp);
+
+	ret = ring_buf_get_finish(&ppp->rx_ringbuf, len);
+	if (ret < 0) {
+		LOG_DBG("Cannot flush ring buffer (%d)", ret);
+	}
+
+	return -EAGAIN;
+}
+
+static void ppp_isr_cb_work(struct k_work *work)
+{
+	struct ppp_driver_context *ppp =
+		CONTAINER_OF(work, struct ppp_driver_context, cb_work);
+	int ret = -EAGAIN;
+
+	while (ret == -EAGAIN) {
+		ret = ppp_consume_ringbuf(ppp);
+	}
+}
+#endif /* !CONFIG_NET_TEST */
+
 static int ppp_driver_init(struct device *dev)
 {
 	struct ppp_driver_context *ppp = dev->driver_data;
 
 	LOG_DBG("[%p] dev %p", ppp, dev);
 
+#if !defined(CONFIG_NET_TEST)
+	ring_buf_init(&ppp->rx_ringbuf, sizeof(ppp->rx_buf), ppp->rx_buf);
+	k_work_init(&ppp->cb_work, ppp_isr_cb_work);
+
+	k_work_q_start(&ppp->cb_workq, ppp_workq,
+		       K_THREAD_STACK_SIZEOF(ppp_workq),
+		       K_PRIO_COOP(PPP_WORKQ_PRIORITY));
+	k_thread_name_set(&ppp->cb_workq.thread, "ppp_workq");
+#endif
+
 	ppp->pkt = NULL;
 	ppp_change_state(ppp, STATE_HDLC_FRAME_START);
+#if defined(CONFIG_PPP_CLIENT_CLIENTSERVER)
+	ppp->client_index = 0;
+#endif
 
 	return 0;
 }
@@ -628,11 +757,11 @@ use_random_mac:
 
 	memset(ppp->buf, 0, sizeof(ppp->buf));
 
-	/* We do not use uart_pipe for unit tests as the unit test has its
-	 * own handling of UART. See tests/net/ppp/driver for details.
+	/* If we have a GSM modem with PPP support, then do not start the
+	 * interface automatically but only after the modem is ready.
 	 */
-	if (!IS_ENABLED(CONFIG_NET_TEST)) {
-		uart_pipe_register(ppp->buf, sizeof(ppp->buf), ppp_recv_cb);
+	if (IS_ENABLED(CONFIG_MODEM_GSM_PPP)) {
+		net_if_flag_set(iface, NET_IF_NO_AUTO_START);
 	}
 }
 
@@ -645,9 +774,96 @@ static struct net_stats_ppp *ppp_get_stats(struct device *dev)
 }
 #endif
 
+#if !defined(CONFIG_NET_TEST)
+static void ppp_uart_flush(struct device *dev)
+{
+	uint8_t c;
+
+	while (uart_fifo_read(dev, &c, 1) > 0) {
+		continue;
+	}
+}
+
+static void ppp_uart_isr(void *user_data)
+{
+	struct ppp_driver_context *context = user_data;
+	struct device *uart = context->dev;
+	int rx = 0, ret;
+
+	/* get all of the data off UART as fast as we can */
+	while (uart_irq_update(uart) && uart_irq_rx_ready(uart)) {
+		rx = uart_fifo_read(uart, context->buf, sizeof(context->buf));
+		if (rx <= 0) {
+			continue;
+		}
+
+		ret = ring_buf_put(&context->rx_ringbuf, context->buf, rx);
+		if (ret < rx) {
+			LOG_ERR("Rx buffer doesn't have enough space. "
+				"Bytes pending: %d, written: %d",
+				rx, ret);
+			break;
+		}
+
+		k_work_submit_to_queue(&context->cb_workq, &context->cb_work);
+	}
+}
+#endif /* !CONFIG_NET_TEST */
+
 static int ppp_start(struct device *dev)
 {
 	struct ppp_driver_context *context = dev->driver_data;
+
+	/* Init the PPP UART only once. This should only be done after
+	 * the GSM muxing is setup and enabled. GSM modem will call this
+	 * after everything is ready to be connected.
+	 */
+#if !defined(CONFIG_NET_TEST)
+	if (atomic_cas(&context->modem_init_done, false, true)) {
+		const char *dev_name = NULL;
+
+		/* Now try to figure out what device to open. If GSM muxing
+		 * is enabled, then use it. If not, then check if modem
+		 * configuration is enabled, and use that. If none are enabled,
+		 * then use our own config.
+		 */
+#if IS_ENABLED(CONFIG_GSM_MUX)
+		struct device *mux;
+
+		mux = uart_mux_find(CONFIG_GSM_MUX_DLCI_PPP);
+		if (mux == NULL) {
+			LOG_ERR("Cannot find GSM mux dev for DLCI %d",
+				CONFIG_GSM_MUX_DLCI_PPP);
+			return -ENOENT;
+		}
+
+		dev_name = mux->name;
+#elif IS_ENABLED(CONFIG_MODEM_GSM_PPP)
+		dev_name = CONFIG_MODEM_GSM_UART_NAME;
+#else
+		dev_name = CONFIG_NET_PPP_UART_NAME;
+#endif
+		if (dev_name == NULL || dev_name[0] == '\0') {
+			LOG_ERR("UART configuration is wrong!");
+			return -EINVAL;
+		}
+
+		LOG_DBG("Initializing PPP to use %s", dev_name);
+
+		context->dev = device_get_binding(dev_name);
+		if (!context->dev) {
+			LOG_ERR("Cannot find dev %s", dev_name);
+			return -ENODEV;
+		}
+
+		uart_irq_rx_disable(context->dev);
+		uart_irq_tx_disable(context->dev);
+		ppp_uart_flush(context->dev);
+		uart_irq_callback_user_data_set(context->dev, ppp_uart_isr,
+						context);
+		uart_irq_rx_enable(context->dev);
+	}
+#endif /* !CONFIG_NET_TEST */
 
 	net_ppp_carrier_on(context->iface);
 
@@ -675,6 +891,6 @@ static const struct ppp_api ppp_if_api = {
 };
 
 NET_DEVICE_INIT(ppp, CONFIG_NET_PPP_DRV_NAME, ppp_driver_init,
-		&ppp_driver_context_data, NULL,
+		device_pm_control_nop, &ppp_driver_context_data, NULL,
 		CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &ppp_if_api,
 		PPP_L2, NET_L2_GET_CTX_TYPE(PPP_L2), PPP_MTU);

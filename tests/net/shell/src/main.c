@@ -29,6 +29,7 @@ LOG_MODULE_REGISTER(net_test, NET_LOG_LEVEL);
 #include <net/ethernet.h>
 #include <net/dummy.h>
 #include <net/udp.h>
+#include <random/rand32.h>
 
 #include "ipv4.h"
 #include "ipv6.h"
@@ -53,7 +54,7 @@ static bool test_failed;
 static struct k_sem recv_lock;
 
 struct net_udp_context {
-	u8_t mac_addr[sizeof(struct net_eth_addr)];
+	uint8_t mac_addr[sizeof(struct net_eth_addr)];
 	struct net_linkaddr ll_addr;
 };
 
@@ -66,7 +67,7 @@ int net_udp_dev_init(struct device *dev)
 	return 0;
 }
 
-static u8_t *net_udp_get_mac(struct device *dev)
+static uint8_t *net_udp_get_mac(struct device *dev)
 {
 	struct net_udp_context *context = dev->driver_data;
 
@@ -85,7 +86,7 @@ static u8_t *net_udp_get_mac(struct device *dev)
 
 static void net_udp_iface_init(struct net_if *iface)
 {
-	u8_t *mac = net_udp_get_mac(net_if_get_device(iface));
+	uint8_t *mac = net_udp_get_mac(net_if_get_device(iface));
 
 	net_if_set_link_addr(iface, mac, 6, NET_LINK_ETHERNET);
 }
@@ -135,7 +136,8 @@ static struct dummy_api net_udp_if_api = {
 #define _ETH_L2_CTX_TYPE NET_L2_GET_CTX_TYPE(DUMMY_L2)
 
 NET_DEVICE_INIT(net_udp_test, "net_udp_test",
-		net_udp_dev_init, &net_udp_context_data, NULL,
+		net_udp_dev_init, device_pm_control_nop,
+		&net_udp_context_data, NULL,
 		CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
 		&net_udp_if_api, _ETH_L2_LAYER, _ETH_L2_CTX_TYPE, 127);
 

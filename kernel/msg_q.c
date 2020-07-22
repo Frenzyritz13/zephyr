@@ -16,12 +16,14 @@
 #include <toolchain.h>
 #include <linker/sections.h>
 #include <string.h>
+#include <ksched.h>
 #include <wait_q.h>
 #include <sys/dlist.h>
 #include <sys/math_extras.h>
 #include <init.h>
 #include <syscall_handler.h>
 #include <kernel_internal.h>
+#include <sys/check.h>
 
 #ifdef CONFIG_OBJECT_TRACING
 
@@ -45,7 +47,7 @@ SYS_INIT(init_msgq_module, PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_OBJECTS);
 #endif /* CONFIG_OBJECT_TRACING */
 
 void k_msgq_init(struct k_msgq *msgq, char *buffer, size_t msg_size,
-		 u32_t max_msgs)
+		 uint32_t max_msgs)
 {
 	msgq->msg_size = msg_size;
 	msgq->max_msgs = max_msgs;
@@ -64,7 +66,7 @@ void k_msgq_init(struct k_msgq *msgq, char *buffer, size_t msg_size,
 }
 
 int z_impl_k_msgq_alloc_init(struct k_msgq *msgq, size_t msg_size,
-			    u32_t max_msgs)
+			    uint32_t max_msgs)
 {
 	void *buffer;
 	int ret;
@@ -88,7 +90,7 @@ int z_impl_k_msgq_alloc_init(struct k_msgq *msgq, size_t msg_size,
 
 #ifdef CONFIG_USERSPACE
 int z_vrfy_k_msgq_alloc_init(struct k_msgq *q, size_t msg_size,
-			    u32_t max_msgs)
+			    uint32_t max_msgs)
 {
 	Z_OOPS(Z_SYSCALL_OBJ_NEVER_INIT(q, K_OBJ_MSGQ));
 
@@ -97,20 +99,23 @@ int z_vrfy_k_msgq_alloc_init(struct k_msgq *q, size_t msg_size,
 #include <syscalls/k_msgq_alloc_init_mrsh.c>
 #endif
 
-void k_msgq_cleanup(struct k_msgq *msgq)
+int k_msgq_cleanup(struct k_msgq *msgq)
 {
-	__ASSERT_NO_MSG(z_waitq_head(&msgq->wait_q) == NULL);
+	CHECKIF(z_waitq_head(&msgq->wait_q) != NULL) {
+		return -EBUSY;
+	}
 
 	if ((msgq->flags & K_MSGQ_FLAG_ALLOC) != 0) {
 		k_free(msgq->buffer_start);
 		msgq->flags &= ~K_MSGQ_FLAG_ALLOC;
 	}
+	return 0;
 }
 
 
-int z_impl_k_msgq_put(struct k_msgq *msgq, void *data, s32_t timeout)
+int z_impl_k_msgq_put(struct k_msgq *msgq, void *data, k_timeout_t timeout)
 {
-	__ASSERT(!z_arch_is_in_isr() || timeout == K_NO_WAIT, "");
+	__ASSERT(!arch_is_in_isr() || K_TIMEOUT_EQ(timeout, K_NO_WAIT), "");
 
 	struct k_thread *pending_thread;
 	k_spinlock_key_t key;
@@ -126,7 +131,7 @@ int z_impl_k_msgq_put(struct k_msgq *msgq, void *data, s32_t timeout)
 			(void)memcpy(pending_thread->base.swap_data, data,
 			       msgq->msg_size);
 			/* wake up waiting thread */
-			z_arch_thread_return_value_set(pending_thread, 0);
+			arch_thread_return_value_set(pending_thread, 0);
 			z_ready_thread(pending_thread);
 			z_reschedule(&msgq->lock, key);
 			return 0;
@@ -140,7 +145,7 @@ int z_impl_k_msgq_put(struct k_msgq *msgq, void *data, s32_t timeout)
 			msgq->used_msgs++;
 		}
 		result = 0;
-	} else if (timeout == K_NO_WAIT) {
+	} else if (K_TIMEOUT_EQ(timeout, K_NO_WAIT)) {
 		/* don't wait for message space to become available */
 		result = -ENOMSG;
 	} else {
@@ -155,7 +160,8 @@ int z_impl_k_msgq_put(struct k_msgq *msgq, void *data, s32_t timeout)
 }
 
 #ifdef CONFIG_USERSPACE
-static inline int z_vrfy_k_msgq_put(struct k_msgq *q, void *data, s32_t timeout)
+static inline int z_vrfy_k_msgq_put(struct k_msgq *q, void *data,
+				    k_timeout_t timeout)
 {
 	Z_OOPS(Z_SYSCALL_OBJ(q, K_OBJ_MSGQ));
 	Z_OOPS(Z_SYSCALL_MEMORY_READ(data, q->msg_size));
@@ -183,9 +189,9 @@ static inline void z_vrfy_k_msgq_get_attrs(struct k_msgq *q,
 #include <syscalls/k_msgq_get_attrs_mrsh.c>
 #endif
 
-int z_impl_k_msgq_get(struct k_msgq *msgq, void *data, s32_t timeout)
+int z_impl_k_msgq_get(struct k_msgq *msgq, void *data, k_timeout_t timeout)
 {
-	__ASSERT(!z_arch_is_in_isr() || timeout == K_NO_WAIT, "");
+	__ASSERT(!arch_is_in_isr() || K_TIMEOUT_EQ(timeout, K_NO_WAIT), "");
 
 	k_spinlock_key_t key;
 	struct k_thread *pending_thread;
@@ -215,13 +221,13 @@ int z_impl_k_msgq_get(struct k_msgq *msgq, void *data, s32_t timeout)
 			msgq->used_msgs++;
 
 			/* wake up waiting thread */
-			z_arch_thread_return_value_set(pending_thread, 0);
+			arch_thread_return_value_set(pending_thread, 0);
 			z_ready_thread(pending_thread);
 			z_reschedule(&msgq->lock, key);
 			return 0;
 		}
 		result = 0;
-	} else if (timeout == K_NO_WAIT) {
+	} else if (K_TIMEOUT_EQ(timeout, K_NO_WAIT)) {
 		/* don't wait for a message to become available */
 		result = -ENOMSG;
 	} else {
@@ -236,7 +242,8 @@ int z_impl_k_msgq_get(struct k_msgq *msgq, void *data, s32_t timeout)
 }
 
 #ifdef CONFIG_USERSPACE
-static inline int z_vrfy_k_msgq_get(struct k_msgq *q, void *data, s32_t timeout)
+static inline int z_vrfy_k_msgq_get(struct k_msgq *q, void *data,
+				    k_timeout_t timeout)
 {
 	Z_OOPS(Z_SYSCALL_OBJ(q, K_OBJ_MSGQ));
 	Z_OOPS(Z_SYSCALL_MEMORY_WRITE(data, q->msg_size));
@@ -287,7 +294,7 @@ void z_impl_k_msgq_purge(struct k_msgq *msgq)
 
 	/* wake up any threads that are waiting to write */
 	while ((pending_thread = z_unpend_first_thread(&msgq->wait_q)) != NULL) {
-		z_arch_thread_return_value_set(pending_thread, -ENOMSG);
+		arch_thread_return_value_set(pending_thread, -ENOMSG);
 		z_ready_thread(pending_thread);
 	}
 
@@ -305,14 +312,14 @@ static inline void z_vrfy_k_msgq_purge(struct k_msgq *q)
 }
 #include <syscalls/k_msgq_purge_mrsh.c>
 
-static inline u32_t z_vrfy_k_msgq_num_free_get(struct k_msgq *q)
+static inline uint32_t z_vrfy_k_msgq_num_free_get(struct k_msgq *q)
 {
 	Z_OOPS(Z_SYSCALL_OBJ(q, K_OBJ_MSGQ));
 	return z_impl_k_msgq_num_free_get(q);
 }
 #include <syscalls/k_msgq_num_free_get_mrsh.c>
 
-static inline u32_t z_vrfy_k_msgq_num_used_get(struct k_msgq *q)
+static inline uint32_t z_vrfy_k_msgq_num_used_get(struct k_msgq *q)
 {
 	Z_OOPS(Z_SYSCALL_OBJ(q, K_OBJ_MSGQ));
 	return z_impl_k_msgq_num_used_get(q);
